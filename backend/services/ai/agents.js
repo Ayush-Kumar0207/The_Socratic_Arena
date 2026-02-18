@@ -13,9 +13,12 @@
  * -----------------------------------------------------------------------------
  */
 
-// OpenAI embedding + chat clients used by LangChain.
-// NOTE: Requires OPENAI_API_KEY in environment variables.
-import { OpenAIEmbeddings, ChatOpenAI } from '@langchain/openai';
+// Google Gemini embedding + chat clients used by LangChain.
+// NOTE: Requires GOOGLE_API_KEY in environment variables.
+import {
+  GoogleGenerativeAIEmbeddings,
+  ChatGoogleGenerativeAI,
+} from '@langchain/google-genai';
 
 // MemoryVectorStore keeps vectors in-memory for fast prototyping and local runs.
 import { MemoryVectorStore } from 'langchain/vectorstores/memory';
@@ -77,10 +80,10 @@ export const createKnowledgeBase = async (chunks) => {
         }),
     );
 
-    // Create embeddings client. The model transforms text -> vectors.
-    const embeddings = new OpenAIEmbeddings({
-      model: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
-      apiKey: process.env.OPENAI_API_KEY,
+    // Create Gemini embeddings client. The model transforms text -> vectors.
+    const embeddings = new GoogleGenerativeAIEmbeddings({
+      model: 'text-embedding-004',
+      apiKey: process.env.GOOGLE_API_KEY,
     });
 
     // Build vector store by embedding and indexing all documents in memory.
@@ -128,7 +131,7 @@ const formatRetrievedEvidence = (documents) => {
  * - Defender and Critic must behave differently to generate a useful debate.
  * - Strong role prompts reduce bland, generic responses.
  *
- * @param {ChatOpenAI} model - Shared chat model instance.
+ * @param {ChatGoogleGenerativeAI} model - Shared chat model instance.
  * @param {string} systemPrompt - Persona instructions.
  * @returns {{ invoke: (input: {topic: string, evidence: string, priorContext?: string}) => Promise<string> }}
  */
@@ -193,11 +196,11 @@ export const createAgents = async (retriever) => {
       throw new Error('A valid retriever with an invoke function is required to create agents.');
     }
 
-    // Shared chat model configuration for both personas.
-    const chatModel = new ChatOpenAI({
-      model: process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini',
+    // Shared Gemini chat model configuration for both personas.
+    const chatModel = new ChatGoogleGenerativeAI({
+      model: 'gemini-2.5-flash',
       temperature: 0.5,
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.GOOGLE_API_KEY,
     });
 
     // Defender persona: support and fortify document claims with evidence.
