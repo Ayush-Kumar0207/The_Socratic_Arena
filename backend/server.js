@@ -26,6 +26,9 @@ import http from 'http';
 // Socket.io adds real-time, bidirectional communication between frontend and backend.
 import { Server as SocketIOServer } from 'socket.io';
 
+// Import API routes so HTTP endpoints can be mounted under /api.
+import apiRoutes from './routes/apiRoutes.js';
+
 /**
  * Create the Express app instance.
  *
@@ -47,6 +50,10 @@ app.use(express.json());
 // Parse URL-encoded payloads (HTML form submissions).
 // extended: true allows richer object structures in form data.
 app.use(express.urlencoded({ extended: true }));
+
+// Mount all API routes under a versionable base path.
+// Example: POST /api/debate
+app.use('/api', apiRoutes);
 
 /**
  * Health Check Route
