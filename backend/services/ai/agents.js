@@ -33,6 +33,23 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 
 /**
+ * Rate-limit helpers
+ * ---------------------------------------------------------------------------
+ * Google free tier is strict (20 RPM). We keep outbound calls paced and disable
+ * retries so failed requests do not create hidden retry storms.
+ */
+const EMBEDDING_BATCH_SIZE = 2;
+const EMBEDDING_BATCH_DELAY_MS = 4000;
+
+export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRateLimitError = (error) => {
+  const message = `${error?.message || ''}`.toLowerCase();
+  const status = error?.status ?? error?.statusCode ?? error?.response?.status;
+  return status === 429 || message.includes('429') || message.includes('too many requests');
+};
+
+/**
  * createKnowledgeBase
  * ---------------------------------------------------------------------------
  * Builds an in-memory vector knowledge base from chunked text.
@@ -82,12 +99,23 @@ export const createKnowledgeBase = async (chunks) => {
 
     // Create Gemini embeddings client. The model transforms text -> vectors.
     const embeddings = new GoogleGenerativeAIEmbeddings({
-      model: 'text-embedding-004',
+      model: 'gemini-embedding-001',
       apiKey: process.env.GOOGLE_API_KEY,
+      maxRetries: 0,
     });
 
-    // Build vector store by embedding and indexing all documents in memory.
-    const vectorStore = await MemoryVectorStore.fromDocuments(documents, embeddings);
+    // Build vector store incrementally in small batches with strict pacing.
+    const vectorStore = new MemoryVectorStore(embeddings);
+
+    for (let startIndex = 0; startIndex < documents.length; startIndex += EMBEDDING_BATCH_SIZE) {
+      const batch = documents.slice(startIndex, startIndex + EMBEDDING_BATCH_SIZE);
+      await vectorStore.addDocuments(batch);
+
+      // Force a gap between batches to avoid embedding burst traffic.
+      if (startIndex + EMBEDDING_BATCH_SIZE < documents.length) {
+        await delay(EMBEDDING_BATCH_DELAY_MS);
+      }
+    }
 
     // Expose retriever abstraction for downstream agent calls.
     const retriever = vectorStore.asRetriever({
@@ -96,6 +124,10 @@ export const createKnowledgeBase = async (chunks) => {
 
     return { retriever, vectorStore };
   } catch (error) {
+    if (isRateLimitError(error)) {
+      throw new Error('RATE_LIMIT_EMBEDDINGS: Google embedding RPM limit reached while indexing.');
+    }
+
     throw new Error(`Failed to create vector knowledge base: ${error.message}`);
   }
 };
@@ -201,6 +233,7 @@ export const createAgents = async (retriever) => {
       model: 'gemini-2.5-flash',
       temperature: 0.5,
       apiKey: process.env.GOOGLE_API_KEY,
+      maxRetries: 0,
     });
 
     // Defender persona: support and fortify document claims with evidence.
@@ -249,6 +282,10 @@ export const createAgents = async (retriever) => {
 
           return response.trim();
         } catch (error) {
+          if (isRateLimitError(error)) {
+            throw new Error('RATE_LIMIT_CHAT: Google chat RPM limit reached during debate turn.');
+          }
+
           throw new Error(`Failed to generate persona response: ${error.message}`);
         }
       },

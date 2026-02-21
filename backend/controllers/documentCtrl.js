@@ -55,7 +55,7 @@ export const handleDebateUpload = async (req, res) => {
     }
 
     // 2) Validate topic because debate needs a guiding question/context.
-    const { topic, totalRounds } = req.body;
+    const { topic, totalRounds, socketId } = req.body;
 
     if (!topic || typeof topic !== 'string' || !topic.trim()) {
       res.status(400).json({
@@ -65,37 +65,96 @@ export const handleDebateUpload = async (req, res) => {
       return;
     }
 
+    if (!socketId || typeof socketId !== 'string' || !socketId.trim()) {
+      res.status(400).json({
+        success: false,
+        message: 'A valid "socketId" field is required for real-time debate streaming.',
+      });
+      return;
+    }
+
+    // Return immediately so HTTP request does not time out.
+    res.status(202).json({
+      success: true,
+      message: 'Debate started',
+    });
+
     // 3) Extract in-memory PDF buffer from multer.
     // We use memory storage so we can directly parse bytes without saving temporary files.
     const pdfBuffer = req.file.buffer;
+    const io = req.app.get('io');
+    const cancelledDebates = req.app.get('cancelledDebates');
+    const room = socketId.trim();
+    const rounds = Number.parseInt(totalRounds, 10) || 3;
+    cancelledDebates?.delete(room);
 
-    // 4) Parse and chunk document text for retrieval.
-    const { chunks } = await parseAndChunkPdf(pdfBuffer);
+    // Continue heavy debate work in background and stream each turn via socket.
+    (async () => {
+      try {
+        io.to(room).emit('debate_status', { status: 'started', rounds });
 
-    // 5) Build vector knowledge base and get a retriever.
-    const { retriever } = await createKnowledgeBase(chunks);
+        // 4) Parse and chunk document text for retrieval.
+        const { chunks } = await parseAndChunkPdf(pdfBuffer);
 
-    // 6) Build Critic + Defender agents connected to that retriever.
-    const { defender, critic } = await createAgents(retriever);
+        // 5) Build vector knowledge base and get a retriever.
+        const { retriever } = await createKnowledgeBase(chunks);
 
-    // 7) Run debate loop. We pass Defender first and Critic second
-    // because runDebate signature is runDebate(defenderChain, criticChain, ...).
-    const debateTranscript = await runDebate(
-      defender,
-      critic,
-      topic.trim(),
-      Number.parseInt(totalRounds, 10) || 3,
-    );
+        // 6) Build Critic + Defender agents connected to that retriever.
+        const { defender, critic } = await createAgents(retriever);
 
-    // 8) Return transcript to frontend for display/streaming history storage.
-    res.status(200).json({
-      success: true,
-      message: 'Debate completed successfully.',
-      transcript: debateTranscript,
-    });
+        // 7) Stream each turn as it is generated.
+        await runDebate(
+          defender,
+          critic,
+          topic.trim(),
+          rounds,
+          (message) => {
+            io.to(room).emit('debate_turn', message);
+          },
+          {
+            shouldCancel: () => cancelledDebates?.has(room),
+          },
+        );
+
+        io.to(room).emit('debate_complete', {
+          success: true,
+          message: 'Debate completed successfully.',
+        });
+      } catch (backgroundError) {
+        const isRateLimited = `${backgroundError?.message || ''}`.includes('RATE_LIMIT');
+        const isCancelled = `${backgroundError?.message || ''}`.includes('CANCELLED_DEBATE');
+        console.error(
+          '[documentCtrl:handleDebateUpload] Background debate processing failed:',
+          backgroundError,
+        );
+
+        if (isCancelled) {
+          io.to(room).emit('debate_complete', {
+            success: true,
+            cancelled: true,
+            message: 'Debate stopped by user.',
+          });
+        } else {
+          io.to(room).emit('debate_error', {
+            success: false,
+            message: isRateLimited
+              ? 'Google API rate limit reached (429). Please wait about 60 seconds, then try again.'
+              : 'Failed to process debate request. Please try again later.',
+            error: backgroundError.message,
+          });
+        }
+      } finally {
+        cancelledDebates?.delete(room);
+      }
+    })();
   } catch (error) {
     // Robust server-side logging for debugging and observability.
     console.error('[documentCtrl:handleDebateUpload] Failed to process debate request:', error);
+
+    // If headers are already sent, just stop after logging.
+    if (res.headersSent) {
+      return;
+    }
 
     // Return safe, clear error response to client.
     res.status(500).json({

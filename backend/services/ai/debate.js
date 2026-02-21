@@ -1,53 +1,26 @@
 /**
  * debate.js
  * -----------------------------------------------------------------------------
- * This module is responsible for debate orchestration.
- *
- * In previous steps, we built:
- * - RAG preprocessing (parse + chunk)
- * - Persona agents (Defender + Critic)
- *
- * Now, this file runs the turn-based loop so both personas can exchange arguments
- * in a predictable, sequential format.
+ * Debate orchestration with strict pacing for Gemini free-tier rate limits.
  * -----------------------------------------------------------------------------
  */
 
 /**
  * Helper: invokeActor
- * ---------------------------------------------------------------------------
- * Calls an actor chain safely, supporting either:
- * - actor.respond({ topic, priorContext })  OR
- * - actor.invoke({ topic, priorContext })
- *
- * Why this flexibility is useful:
- * - Different chain wrappers sometimes expose `respond` vs `invoke` methods.
- * - Supporting both keeps this loop reusable as architecture evolves.
- *
- * @param {{ respond?: Function, invoke?: Function }} actor - Defender or Critic chain object.
- * @param {string} topic - The immediate argument prompt for this turn.
- * @param {string} priorContext - Prior dialogue context to preserve continuity.
- * @returns {Promise<string>} Actor-generated message text.
- * @throws {Error} If actor interface is invalid or response is empty.
+ * Calls actor.respond(...) or actor.invoke(...), validates output.
  */
 const invokeActor = async (actor, topic, priorContext) => {
-  // Validate actor object shape early for clearer debugging.
   if (!actor || (typeof actor.respond !== 'function' && typeof actor.invoke !== 'function')) {
     throw new Error('Invalid actor chain. Expected an object with respond() or invoke().');
   }
 
-  // Build a normalized payload understood by our agent wrappers.
-  const payload = {
-    topic,
-    priorContext,
-  };
+  const payload = { topic, priorContext };
 
-  // Prefer `respond` (used by our current agents.js), fallback to `invoke`.
   const rawOutput =
     typeof actor.respond === 'function'
       ? await actor.respond(payload)
       : await actor.invoke(payload);
 
-  // Defensive validation so transcript never stores broken/empty content.
   if (!rawOutput || typeof rawOutput !== 'string' || !rawOutput.trim()) {
     throw new Error('Actor returned an empty or invalid response.');
   }
@@ -56,116 +29,137 @@ const invokeActor = async (actor, topic, priorContext) => {
 };
 
 /**
+ * Helper: delay
+ */
+export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const createCancelledError = () => new Error('CANCELLED_DEBATE: Debate cancelled by user request.');
+
+const assertNotCancelled = (shouldCancel) => {
+  if (typeof shouldCancel === 'function' && shouldCancel()) {
+    throw createCancelledError();
+  }
+};
+
+const cancellableDelay = async (ms, shouldCancel) => {
+  const intervalMs = 250;
+  let elapsed = 0;
+
+  while (elapsed < ms) {
+    assertNotCancelled(shouldCancel);
+    const waitFor = Math.min(intervalMs, ms - elapsed);
+    await delay(waitFor);
+    elapsed += waitFor;
+  }
+};
+
+const isRateLimitError = (error) => {
+  const message = `${error?.message || ''}`.toLowerCase();
+  const status = error?.status ?? error?.statusCode ?? error?.response?.status;
+  return status === 429 || message.includes('429') || message.includes('too many requests');
+};
+
+/**
  * runDebate
- * ---------------------------------------------------------------------------
- * Executes a turn-based debate between Critic and Defender.
- *
- * Turn plan per round:
- * 1) Critic attacks (Round 1 starts from initialTopic).
- * 2) Defender responds directly to Critic's latest claim.
- * 3) Next round repeats with Critic attacking Defender's latest claim.
- *
- * Context strategy:
- * - We keep a `debateTranscript` array with every message.
- * - Before each model call, we build a compact text context from transcript.
- * - This allows each actor to "remember" what was said and stay coherent.
- *
- * Error strategy:
- * - The entire loop is wrapped in try/catch.
- * - If any LLM call fails (timeout, API error, etc.), we gracefully stop,
- *   append an error marker, and return transcript collected so far.
- *
- * @param {{ respond?: Function, invoke?: Function }} defenderChain - Defender actor object.
- * @param {{ respond?: Function, invoke?: Function }} criticChain - Critic actor object.
- * @param {string} initialTopic - Original debate topic or prompt.
- * @param {number} [totalRounds=3] - Number of Critic->Defender exchange rounds.
- * @returns {Promise<Array<{speaker: string, text: string}>>} Full debate transcript.
+ * Critic speaks -> wait 6500ms -> Defender speaks -> wait 6500ms
  */
 export const runDebate = async (
   defenderChain,
   criticChain,
   initialTopic,
   totalRounds = 3,
+  onTurn = null,
+  options = {},
 ) => {
-  // This array stores every turn in order for UI rendering and persistence.
   const debateTranscript = [];
+  const { shouldCancel } = options;
+  const strictStyleRules = [
+    'CRITICAL RULE: Keep your response strictly under 3 to 4 sentences.',
+    'Be concise, punchy, aggressive, and highly precise.',
+    'Do not use fluff, filler words, or polite introductory phrases. Get straight to the point.',
+  ].join('\n');
 
   try {
-    // Validate required input so failures are immediate and easy to understand.
     if (!initialTopic || typeof initialTopic !== 'string' || !initialTopic.trim()) {
       throw new Error('A non-empty initialTopic string is required to run a debate.');
     }
 
-    // Normalize rounds to a positive integer.
     const rounds = Number.isInteger(totalRounds) && totalRounds > 0 ? totalRounds : 3;
-
-    // `criticPrompt` is what the Critic receives each round.
-    // Round 1 starts from initial topic; later rounds use Defender's last response.
     let criticPrompt = initialTopic.trim();
 
-    // Main debate loop: each iteration adds exactly one Critic and one Defender turn.
     for (let roundNumber = 1; roundNumber <= rounds; roundNumber += 1) {
-      // Build rolling conversation context from all prior turns.
+      // Stop immediately before making a new model call if a cancel signal arrived.
+      // This is the key quota-saving guard: no more Gemini requests after cancellation.
+      assertNotCancelled(shouldCancel);
+
       const priorContextForCritic =
         debateTranscript.length > 0
           ? debateTranscript.map((turn) => `${turn.speaker}: ${turn.text}`).join('\n')
           : 'No previous turns yet.';
 
-      /**
-       * Critic turn
-       * ---------------------------------------------------------------------
-       * Round 1 instruction: critique the initial topic and identify flaws.
-       * Later rounds: attack the Defender's latest argument.
-       */
       const criticInstruction =
         roundNumber === 1
-          ? `Round ${roundNumber}: Analyze this topic and open with a strong critique, identifying key flaws.\n\nTopic:\n${criticPrompt}`
-          : `Round ${roundNumber}: Attack the Defender's previous argument and expose weaknesses.\n\nDefender's last point:\n${criticPrompt}`;
+          ? `Round ${roundNumber}: Analyze this topic and open with a strong critique, identifying key flaws.\n\nTopic:\n${criticPrompt}\n\n${strictStyleRules}`
+          : `Round ${roundNumber}: Attack the Defender's previous argument and expose weaknesses.\n\nDefender's last point:\n${criticPrompt}\n\n${strictStyleRules}`;
 
       const criticText = await invokeActor(criticChain, criticInstruction, priorContextForCritic);
 
-      debateTranscript.push({
-        speaker: 'Critic',
-        text: criticText,
-      });
+      const criticTurn = { speaker: 'Critic', text: criticText };
+      debateTranscript.push(criticTurn);
+      if (typeof onTurn === 'function') onTurn(criticTurn);
 
-      // Build updated context including Critic's fresh turn for Defender.
+      await cancellableDelay(6500, shouldCancel);
+      assertNotCancelled(shouldCancel);
+
       const priorContextForDefender = debateTranscript
         .map((turn) => `${turn.speaker}: ${turn.text}`)
         .join('\n');
 
-      /**
-       * Defender turn
-       * ---------------------------------------------------------------------
-       * Defender always responds to the Critic's latest argument.
-       * This creates a clear attack/defend rhythm for each round.
-       */
-      const defenderInstruction = `Round ${roundNumber}: Defend the document against the Critic's latest argument.\n\nCritic's claim:\n${criticText}`;
-
+      const defenderInstruction = `Round ${roundNumber}: Defend the document against the Critic's latest argument.\n\nCritic's claim:\n${criticText}\n\n${strictStyleRules}`;
       const defenderText = await invokeActor(
         defenderChain,
         defenderInstruction,
         priorContextForDefender,
       );
 
-      debateTranscript.push({
-        speaker: 'Defender',
-        text: defenderText,
-      });
+      const defenderTurn = { speaker: 'Defender', text: defenderText };
+      debateTranscript.push(defenderTurn);
+      if (typeof onTurn === 'function') onTurn(defenderTurn);
 
-      // Feed Defender's latest statement into next round's Critic prompt.
+      await cancellableDelay(6500, shouldCancel);
       criticPrompt = defenderText;
     }
 
-    // Normal completion: return full transcript.
     return debateTranscript;
   } catch (error) {
-    // Graceful failure: preserve all successful turns and record interruption.
-    debateTranscript.push({
-      speaker: 'System',
-      text: `Debate stopped early due to an error: ${error.message}`,
-    });
+    const isCancelled = `${error?.message || ''}`.includes('CANCELLED_DEBATE');
+    const isRateLimit = isRateLimitError(error);
+    const systemTurn = isCancelled
+      ? {
+          speaker: 'System',
+          text: 'Debate stopped by user. Generation ended before the next model call.',
+        }
+      : isRateLimit
+        ? {
+            speaker: 'System',
+            text: 'Rate limit reached (429). Debate stopped safely. Please wait about 60 seconds and retry.',
+          }
+        : {
+            speaker: 'System',
+            text: `Debate stopped early due to an error: ${error.message}`,
+          };
 
-    return debateTranscript;
+    debateTranscript.push(systemTurn);
+    if (typeof onTurn === 'function') onTurn(systemTurn);
+
+    const taggedError = new Error(
+      isCancelled
+        ? 'CANCELLED_DEBATE: Debate loop stopped by user.'
+        : isRateLimit
+        ? 'RATE_LIMIT_DEBATE: Google RPM limit reached during debate loop.'
+        : error.message,
+    );
+    taggedError.cause = error;
+    throw taggedError;
   }
 };

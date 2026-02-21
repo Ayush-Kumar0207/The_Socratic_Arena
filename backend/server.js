@@ -36,6 +36,7 @@ import apiRoutes from './routes/apiRoutes.js';
  * and global request handling behavior.
  */
 const app = express();
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
 /**
  * Basic Middleware Configuration
@@ -50,6 +51,20 @@ app.use(express.json());
 // Parse URL-encoded payloads (HTML form submissions).
 // extended: true allows richer object structures in form data.
 app.use(express.urlencoded({ extended: true }));
+
+// Explicit CORS setup for frontend HTTP requests.
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', CLIENT_ORIGIN);
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
 
 // Mount all API routes under a versionable base path.
 // Example: POST /api/debate
@@ -86,10 +101,15 @@ const httpServer = http.createServer(app);
  */
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: CLIENT_ORIGIN,
     methods: ['GET', 'POST'],
   },
 });
+
+// Make io available in controllers via req.app.get('io').
+app.set('io', io);
+const cancelledDebates = new Set();
+app.set('cancelledDebates', cancelledDebates);
 
 /**
  * Socket.io Connection Lifecycle
@@ -101,6 +121,7 @@ const io = new SocketIOServer(httpServer, {
 io.on('connection', (socket) => {
   // Log connection details to help beginners observe real-time behavior.
   console.log(`[socket] Client connected: ${socket.id}`);
+  cancelledDebates.delete(socket.id);
 
   // Optional starter event so frontend can verify socket functionality.
   socket.emit('server:ready', {
@@ -108,8 +129,25 @@ io.on('connection', (socket) => {
     socketId: socket.id,
   });
 
+  socket.on('stop_debate', (payload = {}) => {
+    const targetSocketId =
+      typeof payload?.socketId === 'string' && payload.socketId.trim()
+        ? payload.socketId.trim()
+        : socket.id;
+
+    // Cancellation flag is tracked by socketId.
+    // The debate loop checks this flag before each model call and during wait periods,
+    // so we can stop quickly and avoid burning additional Gemini quota.
+    cancelledDebates.add(targetSocketId);
+    io.to(targetSocketId).emit('debate_stopped', {
+      success: true,
+      message: 'Debate stop requested. Ending generation now.',
+    });
+  });
+
   // Listen for disconnection and log it for visibility during development.
   socket.on('disconnect', (reason) => {
+    cancelledDebates.delete(socket.id);
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
   });
 });
