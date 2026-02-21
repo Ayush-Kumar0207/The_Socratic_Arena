@@ -82,7 +82,7 @@ export const createKnowledgeBase = async (chunks) => {
 
     // Create Gemini embeddings client. The model transforms text -> vectors.
     const embeddings = new GoogleGenerativeAIEmbeddings({
-      model: 'text-embedding-004',
+      model: 'gemini-embedding-001',
       apiKey: process.env.GOOGLE_API_KEY,
     });
 
