@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Global baseline styles for the app shell.
+ * Keep this lightweight for now; UI-specific styles will live with components.
+ */
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  margin: 0;
+  min-height: 100vh;
+}
