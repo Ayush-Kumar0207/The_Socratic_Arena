@@ -1,1 +1,45 @@
 @import "tailwindcss";
+
+/* Global Layout Fix */
+html, body, #root {
+  min-height: 100vh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #020617; /* Tailwind slate-950 */
+  color: #f1f5f9; /* Tailwind slate-100 */
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Enable natural scrolling */
+body {
+  overflow: auto;
+}
+
+/* Ensure React root can grow naturally */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* ── Global Dark E-Sports Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b; /* slate-800 */
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155; /* slate-700 */
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
