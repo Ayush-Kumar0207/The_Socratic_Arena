@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, Compass, LayoutDashboard, User, ChevronDown } from 'lucide-react';
+import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords } from 'lucide-react';
 import { useState } from 'react';
 import ProfileModal from './ProfileModal';
 
@@ -31,6 +31,12 @@ const Navbar = ({ user }) => {
               className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/explore') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
             >
               <Compass className="h-4 w-4" /> Explore
+            </Link>
+            <Link 
+              to="/my-arena" 
+              className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/my-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+            >
+              <Swords className="h-4 w-4" /> My Arena
             </Link>
           </div>
         )}

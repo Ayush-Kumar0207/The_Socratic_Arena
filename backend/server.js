@@ -104,7 +104,17 @@ async function evaluateDebate(transcript, matchId) {
  * AI / Audience Auto-Resolve Match Engine
  * Resolves a match officially by calculating Elo and persisting the winner.
  */
+// In-memory set to prevent double-processing of the same match
+const resolvingMatches = new Set();
+
 async function resolveMatch(matchId) {
+  // Dedup guard: skip if already being resolved
+  if (resolvingMatches.has(matchId)) {
+    console.log(`[Timer Resolution] Match ${matchId} is already being processed, skipping.`);
+    return;
+  }
+  resolvingMatches.add(matchId);
+
   try {
     console.log(`[Timer Resolution] Starting resolution for match ${matchId}...`);
     
@@ -119,6 +129,19 @@ async function resolveMatch(matchId) {
       console.log(`[Timer Resolution] Match ${matchId} is already resolved or not found.`);
       return;
     }
+
+    // *** CRITICAL: Update match status to 'completed' FIRST to prevent re-processing ***
+    const { error: matchUpdateError } = await supabase
+      .from('matches')
+      .update({ status: 'completed' })
+      .eq('id', matchId)
+      .eq('status', 'pending_votes'); // Optimistic lock: only update if still pending
+
+    if (matchUpdateError) {
+      console.error(`[Timer Resolution] FAILED to update match status for ${matchId}:`, matchUpdateError.message);
+      return;
+    }
+    console.log(`[Timer Resolution] Match ${matchId} status set to 'completed'.`);
 
     // 2. Calculate scores — handle missing AI scores gracefully
     const hasAiScores = latestMatch.ai_scores && latestMatch.ai_scores.critic && latestMatch.ai_scores.defender;
@@ -135,7 +158,6 @@ async function resolveMatch(matchId) {
       const sAudience = totalVotes > 0 ? (criticVotes - defenderVotes) / totalVotes : 0;
       composite = (nAi * 0.7) + (sAudience * 0.3);
     } else {
-      // Fallback: use audience votes only
       console.log(`[Timer Resolution] No AI scores for ${matchId}, falling back to audience votes only.`);
       composite = totalVotes > 0 ? (criticVotes - defenderVotes) / totalVotes : 0;
     }
@@ -149,25 +171,24 @@ async function resolveMatch(matchId) {
       sCritic = 0.5; sDefender = 0.5; winnerId = null;
     }
 
+
+
     // 3. Fetch Player Profiles — handle missing profiles gracefully
     let criticProfile = { elo_rating: 1200 };
     let defenderProfile = { elo_rating: 1200 };
 
     if (latestMatch.critic_id && latestMatch.defender_id) {
-      const { data: profiles, error: profileError } = await supabase
+      const { data: profiles } = await supabase
         .from('profiles')
         .select('id, elo_rating')
         .in('id', [latestMatch.critic_id, latestMatch.defender_id]);
 
-      if (!profileError && profiles) {
+      if (profiles) {
         const foundCritic = profiles.find(p => p.id === latestMatch.critic_id);
         const foundDefender = profiles.find(p => p.id === latestMatch.defender_id);
         if (foundCritic) criticProfile = foundCritic;
         if (foundDefender) defenderProfile = foundDefender;
       }
-      console.log(`[Timer Resolution] Profiles: Critic=${criticProfile.elo_rating}, Defender=${defenderProfile.elo_rating}`);
-    } else {
-      console.log(`[Timer Resolution] Match ${matchId} missing critic/defender ID, using default Elo.`);
     }
 
     const rCritic = criticProfile.elo_rating || 1200;
@@ -176,7 +197,6 @@ async function resolveMatch(matchId) {
     const eCritic = 1 / (1 + Math.pow(10, (rDefender - rCritic) / 400));
     const eDefender = 1 - eCritic;
 
-    // K-Factor calculation
     const getKFactor = async (userId, rating) => {
       if (!userId) return 30;
       try {
@@ -184,9 +204,7 @@ async function resolveMatch(matchId) {
         if (rating > 1800) return 15;
         if ((count || 0) < 10) return 50;
         return 30;
-      } catch (err) {
-        return 30;
-      }
+      } catch (err) { return 30; }
     };
 
     const kCritic = await getKFactor(latestMatch.critic_id, rCritic);
@@ -195,35 +213,28 @@ async function resolveMatch(matchId) {
     let newCriticRating = Math.round(rCritic + kCritic * (sCritic - eCritic));
     let newDefenderRating = Math.round(rDefender + kDefender * (sDefender - eDefender));
 
-    // Performance Bonus (+5)
     if (totalVotes >= 5) {
       if (sCritic === 1 && (criticVotes / totalVotes) > 0.9) newCriticRating += 5;
       if (sDefender === 1 && (defenderVotes / totalVotes) > 0.9) newDefenderRating += 5;
     }
 
-    console.log(`[Timer Resolution] Match ${matchId} concluded. Winner: ${winnerId}. Evaluated Elo: Critic ${rCritic}->${newCriticRating}, Defender ${rDefender}->${newDefenderRating}`);
+    console.log(`[Timer Resolution] Match ${matchId} winner: ${winnerId}. Elo: Critic ${rCritic}->${newCriticRating}, Defender ${rDefender}->${newDefenderRating}`);
 
-    // 4. Persist results — update profiles only if IDs exist
-    const updatePromises = [
-      supabase.from('matches').update({
-        status: 'completed',
-        winner_id: winnerId,
-        end_reason: 'timer_expired'
-      }).eq('id', matchId)
-    ];
-    
+    // 4. Update Elo ratings (only after match is safely marked completed)
     if (latestMatch.critic_id) {
-      updatePromises.push(supabase.from('profiles').update({ elo_rating: newCriticRating }).eq('id', latestMatch.critic_id));
+      const { error: e1 } = await supabase.from('profiles').update({ elo_rating: newCriticRating }).eq('id', latestMatch.critic_id);
+      if (e1) console.error(`[Timer Resolution] Failed to update critic Elo:`, e1.message);
     }
     if (latestMatch.defender_id) {
-      updatePromises.push(supabase.from('profiles').update({ elo_rating: newDefenderRating }).eq('id', latestMatch.defender_id));
+      const { error: e2 } = await supabase.from('profiles').update({ elo_rating: newDefenderRating }).eq('id', latestMatch.defender_id);
+      if (e2) console.error(`[Timer Resolution] Failed to update defender Elo:`, e2.message);
     }
-
-    await Promise.all(updatePromises);
     
-    console.log(`[Timer Resolution] Atomically resolved match ${matchId} successfully.`);
+    console.log(`[Timer Resolution] ✅ Match ${matchId} fully resolved.`);
   } catch (err) {
     console.error(`[Timer Resolution] Fatal error resolving match ${matchId}:`, err);
+  } finally {
+    resolvingMatches.delete(matchId);
   }
 }
 
@@ -886,6 +897,34 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     } catch (err) {
       console.error('[Semantic Search] Error:', err);
       socket.emit('semantic_search_result', { found: false, matchedTopic: null });
+    }
+  });
+
+  socket.on('semantic_search_completed', async ({ query, contextTopics }) => {
+    try {
+      console.log(`[Semantic Search Completed] Searching for "${query}" among ${contextTopics?.length} topics`);
+      if (!contextTopics || contextTopics.length === 0) {
+        return socket.emit('semantic_search_completed_result', { found: false, matchedTopic: null });
+      }
+
+      const prompt = `You are a highly intelligent semantic search routing AI.
+User query: "${query}"
+Available topics: ${JSON.stringify(contextTopics)}
+
+Task: Determine which single topic from the 'Available topics' list best matches the meaning, intent, or core subject of the 'User query'.
+Even a rough conceptual match is valid (e.g., "is veg good" perfectly matches "veg vs non-veg"). If there is absolutely zero relation to any topic, then it's not found.
+Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false, "matchedTopic": "exact string of matched topic if true, or null"}`;
+
+      const result = await genAI.getGenerativeModel({ model: "gemini-2.5-flash" }).generateContent(prompt);
+      const cleanText = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+      const jsonStr = cleanText.match(/\{[\s\S]*\}/)[0];
+      const jsonResult = JSON.parse(jsonStr);
+
+      console.log(`[Semantic Search Completed] Result:`, jsonResult);
+      socket.emit('semantic_search_completed_result', jsonResult);
+    } catch (err) {
+      console.error('[Semantic Search Completed] Error:', err);
+      socket.emit('semantic_search_completed_result', { found: false, matchedTopic: null });
     }
   });
 

@@ -2,12 +2,17 @@ import { Shield, Activity, BarChart3, Users, Clock, ArrowRight, User } from 'luc
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { getTopicDomain } from '../lib/domainUtils';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
-  const [recentMatches, setRecentMatches] = useState([]);
-  const [stats, setStats] = useState({ elo: 1000, totalMatches: 0 });
+  const [recentMatches, setRecentMatches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dashboard_matches')) || []; } catch { return []; }
+  });
+  const [stats, setStats] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dashboard_stats')) || { elo: 1000, totalMatches: 0 }; } catch { return { elo: 1000, totalMatches: 0 }; }
+  });
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -61,11 +66,14 @@ const Dashboard = ({ user }) => {
           throw rpcError;
         }
 
-        setStats({
+        const newStats = {
           elo: unifiedStats?.elo_rating ?? 1000,
           totalMatches: unifiedStats?.total_matches ?? 0,
           winRate: unifiedStats?.win_rate ?? 0
-        });
+        };
+        setStats(newStats);
+        localStorage.setItem('dashboard_stats', JSON.stringify(newStats));
+        localStorage.setItem('dashboard_matches', JSON.stringify(matchData || []));
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
       }
@@ -197,14 +205,19 @@ const Dashboard = ({ user }) => {
                 recentMatches.map((match) => (
                   <div key={match.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition">
                     <div className="flex justify-between items-start mb-3">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wider ${
-                        match.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                        match.status === 'pending_votes' ? 'bg-purple-500/20 text-purple-400' :
-                        match.status === 'abandoned' ? 'bg-red-500/20 text-red-400' :
-                        'bg-yellow-500/20 text-yellow-400'
-                      }`}>
-                        {match.status === 'pending_votes' ? 'In Deliberation' : match.status}
-                      </span>
+                      <div className="flex flex-col gap-2">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wider w-fit ${
+                          match.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          match.status === 'pending_votes' ? 'bg-purple-500/20 text-purple-400' :
+                          match.status === 'abandoned' ? 'bg-red-500/20 text-red-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {match.status === 'pending_votes' ? 'In Deliberation' : match.status}
+                        </span>
+                        <span className={`shrink-0 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border w-fit ${getTopicDomain(match.topic_title || match.topic).color}`}>
+                          {getTopicDomain(match.topic_title || match.topic).domain}
+                        </span>
+                      </div>
                       {match.status === 'pending_votes' ? (
                         <span className="text-sm font-mono text-purple-400 tracking-widest font-bold drop-shadow-[0_0_5px_rgba(168,85,247,0.5)]">
                           {formatTimeLeft(match.created_at).expired ? (

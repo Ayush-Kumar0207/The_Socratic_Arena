@@ -1,25 +1,32 @@
-import { Compass, Hash, Trophy, Flame, Users, Vote, Activity, Search, X, LayoutGrid, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { Compass, Hash, Trophy, Flame, Users, Vote, Activity, Search, X, LayoutGrid, Layers, ChevronDown, ChevronUp, Bookmark, BookmarkCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { getTopicDomain } from '../lib/domainUtils';
 import React, { useEffect, useState } from 'react';
 
-const Explore = ({ socket }) => {
+const Explore = ({ socket, user }) => {
   const navigate = useNavigate();
-  const [topics, setTopics] = useState([]);
-  const [deliberatingMatches, setDeliberatingMatches] = useState([]);
-  const [completedMatches, setCompletedMatches] = useState([]);
-  const [liveMatches, setLiveMatches] = useState([]);
-  const [activeUserCounts, setActiveUserCounts] = useState({});
-  const [leaderboard, setLeaderboard] = useState([]);
+  const [topics, setTopics] = useState(() => JSON.parse(localStorage.getItem('explore_topics')) || []);
+  const [deliberatingMatches, setDeliberatingMatches] = useState(() => JSON.parse(localStorage.getItem('explore_deliberating')) || []);
+  const [completedMatches, setCompletedMatches] = useState(() => JSON.parse(localStorage.getItem('explore_completed')) || []);
+  const [liveMatches, setLiveMatches] = useState(() => JSON.parse(localStorage.getItem('explore_live')) || []);
+  const [activeUserCounts, setActiveUserCounts] = useState(() => JSON.parse(localStorage.getItem('explore_counts')) || {});
+  const [leaderboard, setLeaderboard] = useState(() => JSON.parse(localStorage.getItem('explore_leaderboard')) || []);
   const [searchQuery, setSearchQuery] = useState('');
   const [deliberationSearchQuery, setDeliberationSearchQuery] = useState('');
+  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [isSearchingDeliberation, setIsSearchingDeliberation] = useState(false);
+  const [isSearchingCompleted, setIsSearchingCompleted] = useState(false);
   const searchTimeoutRef = React.useRef(null);
   const [isCreating, setIsCreating] = useState(false);
   const [topicFeedback, setTopicFeedback] = useState(null);
   const [deliberationFeedback, setDeliberationFeedback] = useState(null);
-  const [topicTotals, setTopicTotals] = useState({});
+  const [completedFeedback, setCompletedFeedback] = useState(null);
+  const [topicTotals, setTopicTotals] = useState(() => JSON.parse(localStorage.getItem('explore_totals')) || {});
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [followedIds, setFollowedIds] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('explore_followed_ids')) || []; } catch { return []; }
+  });
 
   useEffect(() => {
     const fetchTopics = async () => {
@@ -33,6 +40,7 @@ const Explore = ({ socket }) => {
       }
       if (!error && data) {
         setTopics(data);
+        localStorage.setItem('explore_topics', JSON.stringify(data));
       }
     };
 
@@ -46,7 +54,10 @@ const Explore = ({ socket }) => {
       if (error) {
         console.error("[Explore] Leaderboard Fetch Error:", error.message, error.details);
       }
-      setLeaderboard(data || []);
+      if (!error && data) {
+        setLeaderboard(data);
+        localStorage.setItem('explore_leaderboard', JSON.stringify(data));
+      }
     };
 
     const fetchDeliberating = async () => {
@@ -61,6 +72,7 @@ const Explore = ({ socket }) => {
       }
       if (!error && data) {
         setDeliberatingMatches(data);
+        localStorage.setItem('explore_deliberating', JSON.stringify(data));
       }
       
       const { data: compData, error: compErr } = await supabase
@@ -72,6 +84,7 @@ const Explore = ({ socket }) => {
         
       if (!compErr && compData) {
         setCompletedMatches(compData);
+        localStorage.setItem('explore_completed', JSON.stringify(compData));
       }
     };
 
@@ -87,6 +100,7 @@ const Explore = ({ socket }) => {
       }
       if (!error && data) {
         setLiveMatches(data);
+        localStorage.setItem('explore_live', JSON.stringify(data));
 
         // Calculate player density per topic title (2 players per active match)
         const counts = {};
@@ -95,6 +109,7 @@ const Explore = ({ socket }) => {
           if (topic) counts[topic] = (counts[topic] || 0) + 2;
         });
         setActiveUserCounts(counts);
+        localStorage.setItem('explore_counts', JSON.stringify(counts));
       }
     };
 
@@ -113,16 +128,31 @@ const Explore = ({ socket }) => {
           totals[topic] = (totals[topic] || 0) + 1;
         });
         setTopicTotals(totals);
+        localStorage.setItem('explore_totals', JSON.stringify(totals));
       } catch (err) {
         console.error("[Explore] Totals Fetch Error:", err);
       }
     };
     
+    const fetchFollows = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from('topic_follows')
+        .select('topic_id')
+        .eq('user_id', user.id);
+      if (data) {
+        const ids = data.map(f => f.topic_id);
+        setFollowedIds(ids);
+        localStorage.setItem('explore_followed_ids', JSON.stringify(ids));
+      }
+    };
+    
     fetchTopics();
     fetchDeliberating();
-    fetchLive(); // Changed to fetchLive
+    fetchLive();
     fetchLeaderboard();
-    fetchTopicTotals(); // Added this back as it was removed in the diff
+    fetchTopicTotals();
+    fetchFollows();
 
     // Setup global timer for deliberation card countdowns
     const timerInterval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -141,9 +171,43 @@ const Explore = ({ socket }) => {
 
     return () => {
       clearInterval(interval);
+      clearInterval(timerInterval);
       if (socket) socket.off('new_topic_added', fetchTopics);
     };
-  }, [socket]);
+  }, [socket, user]);
+
+  // Follow / Unfollow toggle with optimistic UI
+  const toggleFollow = async (topicId) => {
+    if (!user) return;
+    const isFollowed = followedIds.includes(topicId);
+
+    // Optimistic update
+    const newIds = isFollowed
+      ? followedIds.filter(id => id !== topicId)
+      : [...followedIds, topicId];
+    setFollowedIds(newIds);
+    localStorage.setItem('explore_followed_ids', JSON.stringify(newIds));
+
+    if (isFollowed) {
+      const { error } = await supabase
+        .from('topic_follows')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('topic_id', topicId);
+      if (error) {
+        console.error('[Explore] Unfollow error:', error.message);
+        setFollowedIds(followedIds); // revert
+      }
+    } else {
+      const { error } = await supabase
+        .from('topic_follows')
+        .insert({ user_id: user.id, topic_id: topicId });
+      if (error) {
+        console.error('[Explore] Follow error:', error.message);
+        setFollowedIds(followedIds); // revert
+      }
+    }
+  };
 
   const formatTimeLeft = (createdAt) => {
     const end = new Date(createdAt).getTime() + (24 * 60 * 60 * 1000);
@@ -189,12 +253,44 @@ const Explore = ({ socket }) => {
       setTimeout(() => setDeliberationFeedback(null), 4000);
     };
 
+    const handleSemanticCompletedResult = async (data) => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+      setIsSearchingCompleted(false);
+      
+      if (data.found && data.matchedTopic) {
+        setCompletedSearchQuery(data.matchedTopic);
+        
+        const { data: dbData, error } = await supabase
+          .from('matches')
+          .select('*')
+          .eq('status', 'completed')
+          .eq('topic_title', data.matchedTopic)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        if (!error && dbData && dbData.length > 0) {
+           setCompletedMatches(dbData);
+           setCompletedFeedback({ type: 'success', text: `Found semantic match: "${data.matchedTopic}"` });
+        } else {
+           setCompletedFeedback({ type: 'error', text: 'Error retrieving matches for this topic.' });
+        }
+      } else {
+        setCompletedFeedback({ type: 'error', text: 'No semantically matching completed debates found.' });
+      }
+      setTimeout(() => setCompletedFeedback(null), 4000);
+    };
+
     socket.on('topic_result', handleTopicResult);
     socket.on('semantic_search_result', handleSemanticResult);
+    socket.on('semantic_search_completed_result', handleSemanticCompletedResult);
     
     return () => {
       socket.off('topic_result', handleTopicResult);
       socket.off('semantic_search_result', handleSemanticResult);
+      socket.off('semantic_search_completed_result', handleSemanticCompletedResult);
     };
   }, [socket]);
 
@@ -230,6 +326,36 @@ const Explore = ({ socket }) => {
     socket.emit('semantic_search', { query: deliberationSearchQuery.trim(), contextTopics });
   };
 
+  const handleCompletedSearch = async () => {
+    if (completedSearchQuery.trim().length < 3) return;
+    setIsSearchingCompleted(true);
+    setCompletedFeedback(null);
+
+    // Get unique completed topic titles from DB to feed Gemini
+    const { data, error } = await supabase
+      .from('matches')
+      .select('topic_title')
+      .eq('status', 'completed');
+
+    if (error || !data || data.length === 0) {
+      setIsSearchingCompleted(false);
+      setCompletedFeedback({ type: 'error', text: 'Error fetching completed arenas context.' });
+      setTimeout(() => setCompletedFeedback(null), 4000);
+      return;
+    }
+
+    const contextTopics = [...new Set(data.filter(d => d.topic_title).map(d => d.topic_title))];
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setIsSearchingCompleted(false);
+      setCompletedFeedback({ type: 'error', text: 'Search timed out.' });
+      setTimeout(() => setCompletedFeedback(null), 6000);
+    }, 10000);
+
+    socket.emit('semantic_search_completed', { query: completedSearchQuery.trim(), contextTopics });
+  };
+
   const handleEnterLobby = (topic) => {
     navigate(`/lobby/${topic.id}`, { state: { topic } });
   };
@@ -249,6 +375,8 @@ const Explore = ({ socket }) => {
       });
     return groups;
   };
+
+
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8">
@@ -383,7 +511,7 @@ const Explore = ({ socket }) => {
                       Analyzing Semantics...
                     </>
                   ) : (
-                    'AI Semantic Search'
+                    'Find Active Verdicts'
                   )}
                 </button>
               </div>
@@ -416,9 +544,12 @@ const Explore = ({ socket }) => {
                     <div className="absolute inset-0 bg-purple-500/5 rounded-xl translate-x-2 translate-y-2 -z-10 border border-purple-500/10"></div>
                     <div className="absolute inset-0 bg-purple-500/5 rounded-xl translate-x-4 translate-y-4 -z-20 border border-purple-500/10"></div>
                     
-                    <div className="flex items-center gap-3 mb-4">
+                    <div className="flex items-center gap-3 mb-2">
                       <Layers className="h-6 w-6 text-purple-400" />
-                      <h3 className="text-xl font-bold text-slate-100 line-clamp-2">{title}</h3>
+                      <h3 className="text-xl font-bold text-slate-100 line-clamp-2 flex-1">{title}</h3>
+                      <span className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${getTopicDomain(title).color}`}>
+                        {getTopicDomain(title).domain}
+                      </span>
                     </div>
                     
                     <div className="mt-auto flex items-center justify-between">
@@ -504,13 +635,29 @@ const Explore = ({ socket }) => {
                 key={topic.id} 
                 className="bg-slate-900/50 backdrop-blur-md border border-[#1e293b] rounded-2xl p-6 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(34,211,238,0.1)] hover:-translate-y-1 flex flex-col h-full"
               >
-                <div className="flex justify-between items-start mb-4 gap-8">
-                  <h3 className="text-xl font-bold text-slate-100 leading-snug">
+                <div className="flex justify-between items-start mb-4 gap-3">
+                  <h3 className="text-xl font-bold text-slate-100 leading-snug flex-1">
                     {topic.title}
                   </h3>
-                  <span className="shrink-0 bg-slate-800 text-slate-300 text-xs font-semibold px-3 py-1 rounded-full border border-slate-700">
-                    {topic.category}
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border ${getTopicDomain(topic.title).color}`}>
+                      {getTopicDomain(topic.title).domain}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFollow(topic.id); }}
+                      className={`p-1.5 rounded-lg transition-all border ${
+                        followedIds.includes(topic.id)
+                          ? 'bg-amber-500/15 border-amber-500/30 hover:bg-red-500/15 hover:border-red-500/30'
+                          : 'bg-slate-800/50 border-slate-700/50 hover:bg-amber-500/15 hover:border-amber-500/30'
+                      }`}
+                      title={followedIds.includes(topic.id) ? 'Unfollow' : 'Follow'}
+                    >
+                      {followedIds.includes(topic.id)
+                        ? <BookmarkCheck className="h-4 w-4 text-amber-400" />
+                        : <Bookmark className="h-4 w-4 text-slate-500 hover:text-amber-400" />
+                      }
+                    </button>
+                  </div>
                 </div>
                 
                 {/* Topic info footer */}
@@ -549,17 +696,81 @@ const Explore = ({ socket }) => {
               <Trophy className="h-6 w-6 text-emerald-500" />
               Recently Completed
             </h2>
+
+            {/* Completed Search Bar */}
+            <div className="mb-2 relative flex items-center">
+              <Search className="absolute left-4 h-5 w-5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search past debate topics..."
+                value={completedSearchQuery}
+                onChange={(e) => setCompletedSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && completedSearchQuery.trim().length >= 3) {
+                    handleCompletedSearch();
+                  }
+                }}
+                disabled={isSearchingCompleted}
+                className={`w-full bg-slate-900/50 border border-slate-700/50 rounded-xl py-3 pl-12 pr-12 text-slate-200 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all text-sm ${isSearchingCompleted ? 'opacity-50 cursor-not-allowed' : ''}`}
+              />
+              {completedSearchQuery && !isSearchingCompleted && (
+                <button onClick={() => setCompletedSearchQuery('')} className="absolute right-4 p-1 hover:bg-slate-800 rounded-full transition-colors">
+                  <X className="h-4 w-4 text-slate-400 hover:text-slate-200" />
+                </button>
+              )}
+            </div>
+
+            {/* Completed Search Action Block */}
+            {completedSearchQuery.trim().length >= 3 && !completedFeedback && (
+              <div className="mb-6 p-4 border border-dashed border-emerald-700/50 bg-emerald-950/10 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <span className="text-slate-300 text-sm">Search the archives for past debates.</span>
+                <button
+                  onClick={handleCompletedSearch}
+                  disabled={isSearchingCompleted}
+                  className="shrink-0 px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 text-sm"
+                >
+                  {isSearchingCompleted ? (
+                    <>
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                      </span>
+                      Searching Archives...
+                    </>
+                  ) : (
+                    'Recall Past Arenas'
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Completed Feedback Toast */}
+            {completedFeedback && (
+              <div className={`mb-6 px-4 py-3 rounded-lg text-sm font-medium border ${
+                completedFeedback.type === 'success'
+                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
+                  : 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+              }`}>
+                {completedFeedback.text}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {completedMatches.map((match) => (
+              {completedMatches
+                .filter(m => !completedSearchQuery || (m.topic_title || m.topic || '').toLowerCase().includes(completedSearchQuery.toLowerCase()))
+                .map((match) => (
                 <div 
                   key={match.id} 
                   onClick={() => navigate(`/review/${match.id}`)}
                   className="group cursor-pointer relative bg-[#0b0f19]/80 backdrop-blur-sm border border-emerald-900/30 rounded-xl p-6 flex flex-col h-full hover:border-emerald-500/40 transition-all duration-300 hover:shadow-[0_0_20px_rgba(16,185,129,0.05)] active:scale-[0.98]"
                 >
                   <div className="flex justify-between items-start mb-4 gap-4">
-                    <h3 className="text-lg font-bold text-slate-200 line-clamp-2">
+                    <h3 className="text-lg font-bold text-slate-200 line-clamp-2 flex-1">
                       {match.topic_title || match.topic || 'Custom Debate'}
                     </h3>
+                    <span className={`shrink-0 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${getTopicDomain(match.topic_title || match.topic).color}`}>
+                      {getTopicDomain(match.topic_title || match.topic).domain}
+                    </span>
                   </div>
                   
                   <div className="mt-auto flex items-center justify-between text-slate-400 border-t border-slate-800/50 pt-4">

@@ -8,6 +8,7 @@ import Navbar from './components/Navbar';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import Explore from './components/Explore';
+import MyArena from './components/MyArena';
 import Lobby from './components/Lobby';
 import DebateArena from './components/DebateArena';
 import MatchReview from './components/MatchReview';
@@ -65,6 +66,10 @@ const App = () => {
         <Route 
           path="/explore" 
           element={session ? <Explore user={session.user} socket={socket} /> : <Navigate to="/" replace />} 
+        />
+        <Route 
+          path="/my-arena" 
+          element={session ? <MyArena user={session.user} /> : <Navigate to="/" replace />} 
         />
         <Route 
           path="/lobby/:topicId" 
