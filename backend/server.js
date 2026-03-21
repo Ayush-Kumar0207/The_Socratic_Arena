@@ -92,7 +92,7 @@ ${debateText}`;
 
     const result = await model.generateContent(prompt);
     const rawText = result.response.text();
-    
+
     // STRIP MARKDOWN BEFORE PARSING:
     const cleanedText = rawText.replace(/json/g, '').replace(/```/g, '').trim();
 
@@ -101,7 +101,7 @@ ${debateText}`;
       const { highlights, ...scoresOnly } = aiResponse;
 
       // 3. Update Supabase
-      const { error: updateError } = await supabase.from('matches').update({ 
+      const { error: updateError } = await supabase.from('matches').update({
         ai_scores: scoresOnly,
         highlights: highlights || []
       }).eq('id', matchId);
@@ -110,14 +110,14 @@ ${debateText}`;
         console.error('[CRITICAL] Failed to save AI scores/highlights to Supabase:', updateError.message);
         return;
       }
-      
+
       console.log('Successfully confirmed AI scores and highlights saved to database!');
     } catch (e) {
       console.error("Failed to parse Highlights JSON:", e);
       // Save an empty array if parsing completely fails so the frontend doesn't hang
-      await supabase.from('matches').update({ 
+      await supabase.from('matches').update({
         highlights: [],
-        ai_scores: { error: "Evaluation failed" } 
+        ai_scores: { error: "Evaluation failed" }
       }).eq('id', matchId);
     }
   } catch (err) {
@@ -144,7 +144,7 @@ async function resolveMatch(matchId) {
 
   try {
     console.log(`[Timer Resolution] Starting resolution for match ${matchId}...`);
-    
+
     // 1. Fetch match and verify status
     const { data: latestMatch, error: statusError } = await supabase
       .from('matches')
@@ -256,7 +256,7 @@ async function resolveMatch(matchId) {
       const { error: e2 } = await supabase.from('profiles').update({ elo_rating: newDefenderRating }).eq('id', latestMatch.defender_id);
       if (e2) console.error(`[Timer Resolution] Failed to update defender Elo:`, e2.message);
     }
-    
+
     console.log(`[Timer Resolution] ✅ Match ${matchId} fully resolved.`);
   } catch (err) {
     console.error(`[Timer Resolution] Fatal error resolving match ${matchId}:`, err);
@@ -275,14 +275,14 @@ setInterval(async () => {
       .from('matches')
       .select('id, created_at')
       .eq('status', 'pending_votes');
-      
+
     if (error || !expiredMatches) return;
-    
+
     const now = new Date();
     for (const match of expiredMatches) {
       const createdAt = new Date(match.created_at);
       const hoursDiff = (now - createdAt) / (1000 * 60 * 60);
-      
+
       if (hoursDiff >= 24) {
         console.log(`[Cron] Match ${match.id} has expired voting window (${hoursDiff.toFixed(1)}h). Resolving...`);
         try {
@@ -348,7 +348,7 @@ app.post('/api/matches/:id/summary', async (req, res) => {
     if (error || !match) {
       return res.status(404).json({ success: false, message: 'Match not found' });
     }
-    
+
     if (match.ai_scores && match.ai_scores.overall_summary) {
       return res.json({ success: true, summary: match.ai_scores.overall_summary });
     }
@@ -360,7 +360,7 @@ app.post('/api/matches/:id/summary', async (req, res) => {
     const debateText = match.transcript.map(m => `${m.speaker}: ${m.text}`).join('\n');
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const prompt = `You are a debate summarizer. Read the following debate transcript and provide a single, engaging 1-liner summary that captures the crux of the arguments exchanged. Do NOT wrap in quotes. Keep it under 100 characters.\n\nDebate:\n${debateText}`;
-    
+
     const result = await model.generateContent(prompt);
     let summary = result.response.text().trim();
     // remove quotes if any
@@ -471,9 +471,9 @@ const startRoomTimer = (roomId) => {
       clearInterval(roomTimers[roomId]);
       delete roomTimers[roomId];
       room.status = 'timeout';
-      
+
       const winner = room.criticTime === 0 ? 'Defender' : 'Critic';
-      
+
       // Save match to Supabase before cleanup
       try {
         console.log('Attempting to save match to DB with critic_id:', room.critic_id, 'and defender_id:', room.defender_id);
@@ -481,13 +481,13 @@ const startRoomTimer = (roomId) => {
           transcript_length: room.transcript.length,
           status: 'pending_votes'
         });
-        
+
         // Update the match that was instantiated upon creation
         const { data, error } = await supabase.from('matches').update({
           status: 'pending_votes',
           transcript: room.transcript
         }).eq('id', roomId).select();
-        
+
         if (error) {
           console.error('Supabase Insert Error:', error);
           console.error('Error details:', {
@@ -502,7 +502,7 @@ const startRoomTimer = (roomId) => {
           } else {
             console.log('Match saved to Supabase successfully! Match ID:', data[0]?.id);
             console.log('Match saved! Triggering AI Referee for Match ID:', data[0].id);
-            
+
             // Trigger AI evaluation asynchronously (fire-and-forget)
             evaluateDebate(room.transcript, data[0].id);
           }
@@ -511,7 +511,7 @@ const startRoomTimer = (roomId) => {
         console.error('Error saving match to Supabase:', err);
         console.error('Full error object:', err);
       }
-      
+
       io.to(roomId).emit('match_over', {
         reason: 'timeout',
         winner,
@@ -567,7 +567,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     const now = new Date();
     const lastDisconnect = leaverProfile.last_disconnect_at ? new Date(leaverProfile.last_disconnect_at) : null;
     const isWithin24h = lastDisconnect && (now - lastDisconnect) < 24 * 60 * 60 * 1000;
-    
+
     let disconnectCount = isWithin24h ? (leaverProfile.disconnect_count_24h || 0) + 1 : 1;
     let leaverPenalty = 0;
 
@@ -597,13 +597,13 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
 
     // 4. Atomic Updates
     await Promise.all([
-      supabase.from('profiles').update({ 
+      supabase.from('profiles').update({
         elo_rating: newLeaverRating,
         last_disconnect_at: now.toISOString(),
         disconnect_count_24h: disconnectCount
       }).eq('id', leaverId),
       supabase.from('profiles').update({ elo_rating: newStayerRating }).eq('id', stayerId),
-      supabase.from('matches').update({ 
+      supabase.from('matches').update({
         status: 'abandoned',
         end_reason: 'abandoned',
         winner_id: stayerId,
@@ -650,26 +650,26 @@ io.on('connection', (socket) => {
    * Matchmaking: Join queue
    */  socket.on('join_queue', async ({ userId, topicId, topicTitle, preferredRole = 'Random' }) => {
     console.log(`[matchmaking] 👤 User ${userId || 'anonymous'} joined queue for ${topicId} as ${preferredRole}`);
-    
+
     // Prevent duplicate joins
     for (const queue of Object.values(waitingQueues)) {
       if (queue.some(p => p.socketId === socket.id)) return;
     }
-    
+
     if (!waitingQueues[topicId]) waitingQueues[topicId] = [];
-    
+
     const newPlayer = { socketId: socket.id, userId, preferredRole };
-    
+
     // 🎯 Matchmaking Logic: Find compatible opponent
     let opponentIndex = -1;
     for (let i = 0; i < waitingQueues[topicId].length; i++) {
       const waitPlayer = waitingQueues[topicId][i];
-      
+
       // Compatibility Check
-      const canMatch = 
+      const canMatch =
         (newPlayer.preferredRole === 'Random' || waitPlayer.preferredRole === 'Random') ||
         (newPlayer.preferredRole !== waitPlayer.preferredRole);
-        
+
       if (canMatch) {
         opponentIndex = i;
         break;
@@ -679,7 +679,7 @@ io.on('connection', (socket) => {
     if (opponentIndex !== -1) {
       const player1 = waitingQueues[topicId].splice(opponentIndex, 1)[0];
       const player2 = newPlayer;
-      
+
       // Determine Roles
       let critic, defender;
       if (player1.preferredRole === 'Critic') {
@@ -718,10 +718,10 @@ io.on('connection', (socket) => {
         console.error('Match creation error:', err);
         roomId = `room_${Date.now()}`;
       }
-      
+
       // Join Room
       [critic, defender].forEach(p => io.in(p.socketId).socketsJoin(roomId));
-      
+
       activeRooms[roomId] = {
         players: { critic: critic.socketId, defender: defender.socketId },
         critic_id: critic.userId,
@@ -738,7 +738,7 @@ io.on('connection', (socket) => {
           [defender.userId || defender.socketId]: 1
         }
       };
-      
+
       io.to(roomId).emit('match_found', {
         roomId,
         topic: topicTitle,
@@ -747,7 +747,7 @@ io.on('connection', (socket) => {
           [defender.socketId]: 'Defender'
         }
       });
-      
+
       startRoomTimer(roomId);
       io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic' });
 
@@ -909,9 +909,9 @@ io.on('connection', (socket) => {
       // Refund the lifeline on error
       room.lifelines[callerId] += 1;
       // CRITICAL: Emit fallback to unlock the frontend UI
-      socket.emit('ai_intervention', { 
-          flagged: false, 
-          error: "The AI Judge is currently unavailable or failed to process." 
+      socket.emit('ai_intervention', {
+        flagged: false,
+        error: "The AI Judge is currently unavailable or failed to process."
       });
     }
   });
@@ -953,16 +953,16 @@ Respond STRICTLY with a valid JSON object and nothing else: {"isDuplicate": true
       const result = await genAI.getGenerativeModel({ model: "gemini-2.5-flash" }).generateContent(prompt);
       let jsonResult;
       try {
-          const text = result.response.text();
-          // Strip markdown code blocks if the AI accidentally adds them
-          const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-          // Extract just the JSON object
-          const jsonStr = cleanText.match(/\{[\s\S]*\}/)[0];
-          jsonResult = JSON.parse(jsonStr);
+        const text = result.response.text();
+        // Strip markdown code blocks if the AI accidentally adds them
+        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        // Extract just the JSON object
+        const jsonStr = cleanText.match(/\{[\s\S]*\}/)[0];
+        jsonResult = JSON.parse(jsonStr);
       } catch (parseError) {
-          console.error("[AI Bouncer] Failed to parse Gemini response:", parseError);
-          // Fallback: Assume it's unique if parsing fails, so we don't block the user
-          jsonResult = { isDuplicate: false, matchedTopic: null };
+        console.error("[AI Bouncer] Failed to parse Gemini response:", parseError);
+        // Fallback: Assume it's unique if parsing fails, so we don't block the user
+        jsonResult = { isDuplicate: false, matchedTopic: null };
       }
 
       if (jsonResult.isDuplicate) {
@@ -1050,7 +1050,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
   socket.on('join_as_spectator', (roomId) => {
     socket.join(roomId);
     console.log(`[matchmaking] 👁️ Spectator ${socket.id} joined room ${roomId}`);
-    
+
     // Sync the current state to the late-joining spectator
     const room = activeRooms[roomId];
     if (room) {
@@ -1068,7 +1068,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
    */
   socket.on('disconnect', async (reason) => {
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
-    
+
     // Remove from any topic waiting queue
     for (const [topicId, queue] of Object.entries(waitingQueues)) {
       const index = queue.findIndex(p => p.socketId === socket.id);
@@ -1077,7 +1077,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         console.log(`[disconnect] Removed ${socket.id} from queue for topic ${topicId}`);
       }
     }
-    
+
     // 🛡️ Handle active room disconnection with 30s grace period
     // Try both the tagged property and a fallback scan
     let matchId = socket.currentMatchId;
@@ -1095,16 +1095,16 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
       if (room && room.status === 'active') {
         const role = room.players.critic === socket.id ? 'critic' : 'defender';
         const userId = role === 'critic' ? room.critic_id : room.defender_id;
-        
+
         console.log(`[grace_period] ⏱️ ${role} (${userId}) disconnected from ${matchId}. Starting 30s countdown...`);
-        
-        io.to(matchId).emit('opponent_paused', { 
+
+        io.to(matchId).emit('opponent_paused', {
           role: role === 'critic' ? 'Critic' : 'Defender',
-          message: 'Opponent disconnected. Match paused for 30s...' 
+          message: 'Opponent disconnected. Match paused for 30s...'
         });
 
         if (!gracePeriodTimeouts[matchId]) gracePeriodTimeouts[matchId] = {};
-        
+
         // Clear any existing timeout for this role first (shouldn't happen but safe)
         if (gracePeriodTimeouts[matchId][role]) clearTimeout(gracePeriodTimeouts[matchId][role]);
 
@@ -1112,7 +1112,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           console.log(`[grace_period] 💀 Expired for ${role} in ${matchId}. Abandoning.`);
           if (activeRooms[matchId]) {
             await resolveAbandonedMatch(matchId, role);
-            
+
             // Send detailed disconnect information to all participants including spectators
             io.to(matchId).emit('opponent_disconnected', {
               type: 'abandoned',

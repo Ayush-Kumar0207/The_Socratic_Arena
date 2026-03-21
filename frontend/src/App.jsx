@@ -53,41 +53,41 @@ const App = () => {
 
       <Routes>
         {/* Public / Entry Route */}
-        <Route 
-          path="/" 
-          element={session ? <Navigate to="/dashboard" replace /> : <Login />} 
+        <Route
+          path="/"
+          element={session ? <Navigate to="/dashboard" replace /> : <Login />}
         />
 
         {/* Authenticated Routes */}
-        <Route 
-          path="/dashboard" 
-          element={session ? <Dashboard user={session.user} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/dashboard"
+          element={session ? <Dashboard user={session.user} /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/explore" 
-          element={session ? <Explore user={session.user} socket={socket} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/explore"
+          element={session ? <Explore user={session.user} socket={socket} /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/my-arena" 
-          element={session ? <MyArena user={session.user} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/my-arena"
+          element={session ? <MyArena user={session.user} /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/lobby/:topicId" 
-          element={session ? <Lobby user={session.user} socket={socket} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/lobby/:topicId"
+          element={session ? <Lobby user={session.user} socket={socket} /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/arena/:matchId" 
-          element={session ? <DebateArena socket={socket} user={session.user} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/arena/:matchId"
+          element={session ? <DebateArena socket={socket} user={session.user} /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/review/:matchId" 
-          element={session ? <MatchReview /> : <Navigate to="/" replace />} 
+        <Route
+          path="/review/:matchId"
+          element={session ? <MatchReview /> : <Navigate to="/" replace />}
         />
-        <Route 
-          path="/topic/:topicTitle" 
-          element={session ? <TopicMatches socket={socket} /> : <Navigate to="/" replace />} 
+        <Route
+          path="/topic/:topicTitle"
+          element={session ? <TopicMatches socket={socket} /> : <Navigate to="/" replace />}
         />
-        
+
         {/* Fallback routing */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -12,14 +12,14 @@ import React from 'react';
 export const getRankInfo = (elo) => {
   const rating = Number(elo) || 0;
 
-  if (rating < 800) {
+  if (rating < 1050) {
     return {
       name: 'Novice',
       level: 1,
-      color: 'text-amber-700',
-      bgColor: 'bg-amber-950/40',
-      borderColor: 'border-amber-700/50',
-      gradient: 'from-amber-800 to-amber-600',
+      color: 'text-amber-500',
+      bgColor: 'bg-amber-500/10',
+      borderColor: 'border-amber-500/30',
+      gradient: 'from-amber-600 to-amber-500',
       Icon: Trophy,
       shadow: 'shadow-amber-900/20'
     };
@@ -28,8 +28,8 @@ export const getRankInfo = (elo) => {
       name: 'Thinker',
       level: 2,
       color: 'text-slate-300',
-      bgColor: 'bg-slate-800/60',
-      borderColor: 'border-slate-400/50',
+      bgColor: 'bg-slate-300/10',
+      borderColor: 'border-slate-300/30',
       gradient: 'from-slate-500 to-slate-400',
       Icon: BookOpen,
       shadow: 'shadow-slate-500/20'
@@ -38,23 +38,23 @@ export const getRankInfo = (elo) => {
     return {
       name: 'Scholar',
       level: 3,
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-950/40',
-      borderColor: 'border-yellow-500/50',
-      gradient: 'from-yellow-600 to-yellow-400',
+      color: 'text-emerald-400',
+      bgColor: 'bg-emerald-400/10',
+      borderColor: 'border-emerald-400/30',
+      gradient: 'from-emerald-600 to-emerald-400',
       Icon: Scroll,
-      shadow: 'shadow-yellow-500/20'
+      shadow: 'shadow-emerald-500/20'
     };
   } else if (rating < 1800) {
     return {
       name: 'Philosopher',
       level: 4,
-      color: 'text-purple-400',
-      bgColor: 'bg-purple-950/40',
-      borderColor: 'border-purple-500/50',
-      gradient: 'from-purple-600 to-fuchsia-500',
+      color: 'text-fuchsia-400',
+      bgColor: 'bg-fuchsia-400/10',
+      borderColor: 'border-fuchsia-400/30',
+      gradient: 'from-fuchsia-600 to-fuchsia-400',
       Icon: Star,
-      shadow: 'shadow-purple-500/30'
+      shadow: 'shadow-fuchsia-500/30'
     };
   } else {
     // 1800+
@@ -62,11 +62,11 @@ export const getRankInfo = (elo) => {
       name: 'Oracle',
       level: 5,
       color: 'text-cyan-400',
-      bgColor: 'bg-cyan-950/40',
-      borderColor: 'border-cyan-400/60',
+      bgColor: 'bg-cyan-400/10',
+      borderColor: 'border-cyan-400/30',
       gradient: 'from-cyan-500 to-blue-500',
       Icon: Crown,
-      shadow: 'shadow-cyan-400/40 animate-pulse' // Glowing effect
+      shadow: 'shadow-cyan-400/40 animate-pulse'
     };
   }
 };

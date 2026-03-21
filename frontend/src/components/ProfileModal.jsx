@@ -1,35 +1,41 @@
 import { useEffect, useState, useRef } from 'react';
-import { X, LogOut, Shield, Wifi, Copy, CheckCircle2, ArrowLeft, UserPlus, UserCheck } from 'lucide-react';
+import { X, LogOut, Shield, Wifi, Copy, CheckCircle2, ArrowLeft, UserPlus, UserCheck, Swords } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { getRankInfo } from '../lib/rankUtils';
 
-const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId }) => {
+const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser }) => {
     const navigate = useNavigate();
     const [stats, setStats] = useState({ elo: 1000, matches: 0 });
     const [copied, setCopied] = useState(false);
     const [isFollowing, setIsFollowing] = useState(false);
     const modalRef = useRef(null);
 
+    // Determine which user to display
+    const activeUser = viewUser || currentUser;
+    const isOwnProfile = activeUser?.id === currentUserId || (!viewUser && currentUser);
+
     useEffect(() => {
-        if (!isOpen || !viewUser) return;
+        if (!isOpen || !activeUser) return;
+        
         const fetchStats = async () => {
-            const { data } = await supabase.rpc('get_user_stats', { p_user_id: viewUser.id });
+            const { data } = await supabase.rpc('get_user_stats', { p_user_id: activeUser.id });
             if (data) setStats({ elo: data.elo_rating || 1000, matches: data.total_matches || 0 });
         };
+
         const fetchFollowStatus = async () => {
-            if (!currentUserId || viewUser.id === currentUserId) return;
+            if (!currentUserId || isOwnProfile) return;
             const { data } = await supabase
                 .from('user_follows')
                 .select('id')
                 .eq('follower_id', currentUserId)
-                .eq('followed_id', viewUser.id)
+                .eq('followed_id', activeUser.id)
                 .maybeSingle();
             setIsFollowing(!!data);
         };
+
         fetchStats();
         fetchFollowStatus();
-    }, [isOpen, viewUser, currentUserId]);
+    }, [isOpen, activeUser, currentUserId, isOwnProfile]);
 
     useEffect(() => {
         const handleOutsideClick = (event) => {
@@ -47,13 +53,20 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId }) => {
         };
     }, [isOpen, onClose]);
 
-    if (!isOpen || !viewUser) return null;
+    if (!isOpen || !activeUser) return null;
 
-    const rank = getRankInfo(stats.elo);
-    const RankIcon = rank.Icon;
+    const getRank = (rating) => {
+        if (rating < 1050) return { name: 'Novice', color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
+        if (rating < 1200) return { name: 'Thinker', color: 'text-slate-300', bg: 'bg-slate-300/10', border: 'border-slate-300/30' };
+        if (rating < 1500) return { name: 'Scholar', color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/30' };
+        if (rating < 1800) return { name: 'Philosopher', color: 'text-fuchsia-400', bg: 'bg-fuchsia-400/10', border: 'border-fuchsia-400/30' };
+        return { name: 'Oracle', color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/30' };
+    };
+
+    const rank = getRank(stats.elo);
 
     const handleCopyId = () => {
-        navigator.clipboard.writeText(viewUser.id);
+        navigator.clipboard.writeText(activeUser.id);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -65,62 +78,63 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId }) => {
     };
 
     const toggleFollow = async () => {
-        if (!currentUserId) return;
+        if (!currentUserId || isOwnProfile) return;
         if (isFollowing) {
             setIsFollowing(false);
-            await supabase.from('user_follows').delete().eq('follower_id', currentUserId).eq('followed_id', viewUser.id);
+            await supabase.from('user_follows').delete().eq('follower_id', currentUserId).eq('followed_id', activeUser.id);
         } else {
             setIsFollowing(true);
-            await supabase.from('user_follows').insert({ follower_id: currentUserId, followed_id: viewUser.id });
+            await supabase.from('user_follows').insert({ follower_id: currentUserId, followed_id: activeUser.id });
         }
     };
 
-    const isOwnProfile = viewUser.id === currentUserId;
-
     return (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 sm:p-6">
-            {/* 1. Backdrop */}
-            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"></div>
-
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6">
             {/* 2. Modal Card Container */}
-            <div 
+            <div
                 ref={modalRef}
-                className="relative z-10 w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col mt-8 animate-in slide-in-from-bottom-4 duration-300"
+                className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
                 {/* Header Banner */}
-                <div className="h-24 bg-gradient-to-br from-indigo-900 to-cyan-900 rounded-t-2xl relative">
-                    <button 
-                        onClick={onClose} 
+                <div className="h-24 bg-gradient-to-br from-indigo-900 to-cyan-900 flex-shrink-0 relative">
+                    <button
+                        onClick={onClose}
                         className="absolute top-4 right-4 p-2 bg-slate-950/40 hover:bg-slate-950/80 text-slate-300 rounded-full transition-colors z-10"
                     >
                         <X className="h-5 w-5" />
                     </button>
                 </div>
 
-                {/* Body Container */}
-                <div className="px-6 pb-6 relative flex flex-col items-center">
+                {/* Scrollable Body Container */}
+                <div className="overflow-y-auto custom-scrollbar p-6 flex flex-col gap-4 relative">
                     {/* Floating Avatar */}
-                    <div className="h-20 w-20 bg-slate-800 border-4 border-slate-900 rounded-full flex items-center justify-center shadow-lg z-10 -mt-10 mb-4">
+                    <div className="h-20 w-20 bg-slate-800 border-4 border-slate-900 rounded-full flex items-center justify-center shadow-lg mx-auto -mt-16 mb-2 flex-shrink-0 z-10">
                         <span className="text-3xl font-bold text-cyan-400 uppercase">
-                            {viewUser.username ? viewUser.username.charAt(0) : (viewUser?.email?.charAt(0) || '?')}
+                            {activeUser?.username ? activeUser.username.charAt(0) : (activeUser?.email?.charAt(0) || '?')}
                         </span>
                     </div>
 
                     {/* User Identity */}
-                    <div className="text-center w-full mb-6">
-                        <h3 className="text-lg font-bold text-slate-100 truncate px-2">{viewUser.username || viewUser?.email?.split('@')[0]}</h3>
+                    <div className="text-center w-full mb-2">
+                        <h3 className="text-lg font-bold text-slate-100 truncate px-2">{activeUser?.username || activeUser?.email}</h3>
                         <p className="text-sm text-cyan-400/80 font-medium mt-1">Socratic Arena Member</p>
                     </div>
 
                     {/* Professional Features */}
-                    <div className="flex flex-col gap-3 w-full mb-6">
+                    <div className="flex flex-col gap-3 w-full">
                         {/* Rank Badge */}
-                        <div className={`flex items-center gap-4 p-3 rounded-xl border ${rank.bgColor} ${rank.borderColor}`}>
-                            <RankIcon className={`h-6 w-6 shrink-0 ${rank.color} ${rank.shadow}`} />
+                        <div className={`flex items-center gap-4 p-3 rounded-xl border ${rank.bg} ${rank.border}`}>
+                            <Shield className={`h-6 w-6 shrink-0 ${rank.color}`} />
                             <div className="text-left overflow-hidden">
                                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Current Division</p>
                                 <p className={`text-sm font-bold truncate ${rank.color}`}>{rank.name}</p>
                             </div>
+                        </div>
+
+                        {/* Matches Played Stat */}
+                        <div className="flex items-center gap-4 p-3 rounded-xl border border-slate-700 bg-slate-800/20">
+                            <Swords className="h-5 w-5 text-rose-400 shrink-0" />
+                            <p className="text-sm font-medium text-slate-300">{stats?.matches || 0} Total Matches Played</p>
                         </div>
 
                         {/* Player ID Copy */}
@@ -128,7 +142,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId }) => {
                             <div className="flex items-center gap-4 overflow-hidden">
                                 <div className="overflow-hidden">
                                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Socratic ID</p>
-                                    <p className="text-sm text-slate-300 font-mono truncate max-w-[180px]">{viewUser?.id?.split('-')[0]}...</p>
+                                    <p className="text-sm text-slate-300 font-mono truncate max-w-[180px]">{activeUser?.id?.split('-')[0]}...</p>
                                 </div>
                             </div>
                             {copied ? <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" /> : <Copy className="h-5 w-5 text-slate-500 group-hover:text-cyan-400 transition-colors shrink-0" />}
@@ -142,41 +156,42 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId }) => {
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex gap-3 w-full">
+                    <div className="flex flex-col gap-3 w-full mt-2">
+                        {/* Primary Action */}
                         <button 
-                            onClick={onClose} 
-                            className="flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                            onClick={() => alert("Direct Challenges are unlocking in Phase 4!")} 
+                            className="w-full py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-slate-900 bg-cyan-400 hover:bg-cyan-300 transition-colors shadow-[0_0_15px_rgba(34,211,238,0.3)] cursor-pointer"
                         >
-                            <ArrowLeft className="h-5 w-5" /> Return
+                            <Swords className="h-5 w-5" /> Challenge to Debate
                         </button>
-                        
-                        {isOwnProfile ? (
+
+                        {/* Secondary Actions */}
+                        <div className="flex gap-3 w-full">
                             <button 
-                                onClick={handleSignOut} 
-                                className="flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all"
+                                onClick={onClose} 
+                                className="flex-1 py-3 rounded-xl flex items-center justify-center font-bold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
                             >
-                                <LogOut className="h-5 w-5" /> Sign Out
+                                Return
                             </button>
-                        ) : (
-                            <button 
-                                onClick={toggleFollow} 
-                                className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border ${
-                                    isFollowing 
-                                    ? 'text-cyan-400 bg-cyan-950/30 hover:bg-cyan-950/60 border-cyan-500/30' 
-                                    : 'text-indigo-300 bg-indigo-600/20 hover:bg-indigo-600/40 border-indigo-500/30'
-                                }`}
-                            >
-                                {isFollowing ? (
-                                    <><UserCheck className="h-5 w-5" /> Following</>
-                                ) : (
-                                    <><UserPlus className="h-5 w-5" /> Follow</>
-                                )}
-                            </button>
-                        )}
+
+                            {isOwnProfile ? (
+                                <button
+                                    onClick={handleSignOut}
+                                    className="flex-1 py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer"
+                                >
+                                    <LogOut className="h-5 w-5" /> Sign Out
+                                </button>
+                            ) : (
+                                <button className="flex-1 py-3 rounded-xl flex items-center justify-center font-bold text-cyan-400 bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-cyan-500/30">
+                                    Following
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     );
-}
+};
+
 export default ProfileModal;
