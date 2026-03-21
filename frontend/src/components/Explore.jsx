@@ -32,6 +32,28 @@ const Explore = ({ socket, user }) => {
   const [followedIds, setFollowedIds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('explore_followed_ids')) || []; } catch { return []; }
   });
+  const [searchId, setSearchId] = useState('');
+  const [searchError, setSearchError] = useState('');
+
+  const handleSearchUser = async (e) => {
+    e.preventDefault();
+    setSearchError('');
+    if (!searchId.trim()) return;
+
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', searchId.trim())
+        .single();
+
+    if (data) {
+        setSelectedProfile(data);
+        setIsProfileModalOpen(true);
+        setSearchId('');
+    } else {
+        setSearchError('User not found. Check the Socratic ID.');
+    }
+  };
 
   useEffect(() => {
     const fetchTopics = async () => {
@@ -858,6 +880,26 @@ const Explore = ({ socket, user }) => {
             </div>
           </div>
         )}
+
+        {/* Find Debater Search Bar */}
+        <div className="mb-8 p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
+            <h3 className="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
+                <Search className="h-5 w-5 text-cyan-400" /> Find Debater
+            </h3>
+            <form onSubmit={handleSearchUser} className="flex gap-3">
+                <input
+                    type="text"
+                    placeholder="Enter Socratic ID (e.g. 1ab66dbc...)"
+                    value={searchId}
+                    onChange={(e) => setSearchId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <button type="submit" className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold rounded-xl transition-colors cursor-pointer">
+                    Search
+                </button>
+            </form>
+            {searchError && <p className="text-rose-500 text-sm mt-2">{searchError}</p>}
+        </div>
 
         <div>
           <h2 className="text-2xl font-bold text-slate-100 mb-6 flex items-center gap-3 border-b border-[#1e293b] pb-4 mt-8">
