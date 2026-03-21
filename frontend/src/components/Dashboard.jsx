@@ -150,11 +150,32 @@ const Dashboard = ({ user }) => {
     };
   }, [recentMatches, user]);
 
-  const radarData = [
+  const radarData = useMemo(() => [
     { subject: 'Logic', score: parseFloat(averageStats.logic.toFixed(1)), fullMark: 10 },
     { subject: 'Facts', score: parseFloat(averageStats.facts.toFixed(1)), fullMark: 10 },
     { subject: 'Relevance', score: parseFloat(averageStats.relevance.toFixed(1)), fullMark: 10 },
-  ];
+  ], [averageStats]);
+
+  const memoizedRadarChart = useMemo(() => (
+    <ResponsiveContainer width="100%" height={280}>
+      <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+        <PolarGrid stroke="#334155" />
+        <PolarAngleAxis 
+          dataKey="subject" 
+          tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} 
+        />
+        <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
+        <Radar 
+          name="Cognitive Profile" 
+          dataKey="score" 
+          stroke="#06b6d4" 
+          fill="#06b6d4" 
+          fillOpacity={0.5} 
+          isAnimationActive={false} 
+        />
+      </RadarChart>
+    </ResponsiveContainer>
+  ), [radarData]);
 
   const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Debater';
   const displayEmail = user?.email || '';
@@ -207,15 +228,8 @@ const Dashboard = ({ user }) => {
               <BarChart3 className="h-5 w-5 text-cyan-400" />
               Cognitive Profile
             </h2>
-            <div className="w-full h-[280px]">
-              <ResponsiveContainer width="100%" height={280}>
-                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                  <PolarGrid stroke="#334155" />
-                  <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 13 }} />
-                  <PolarRadiusAxis angle={30} domain={[0, 10]} tick={{ fill: '#64748b' }} />
-                  <Radar name="Debater Stats" dataKey="score" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.6} />
-                </RadarChart>
-              </ResponsiveContainer>
+            <div className="h-64 w-full mt-4">
+              {memoizedRadarChart}
             </div>
             {averageStats.logic === 0 && (
               <p className="text-center text-xs text-slate-500 mt-2">Play more matches to build your profile.</p>

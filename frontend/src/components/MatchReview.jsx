@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { ArrowLeft, User, Clock, Trophy, Vote, BarChart3, Target, Play, Square, Loader2, Share2, Download, Sparkles, Quote } from 'lucide-react';
@@ -20,6 +20,47 @@ const MatchReview = () => {
   const isPlayingRef = useRef(false);
   const messagesEndRef = useRef(null);
   const [exportingId, setExportingId] = useState(null);
+
+  // Memoize the chart data to prevent flickering
+  const radarData = useMemo(() => {
+    if (!match?.ai_scores) return [];
+    return [
+      {
+        subject: 'Logic',
+        Critic: match.ai_scores.critic?.logic ?? match.ai_scores.critic?.Logic ?? 0,
+        Defender: match.ai_scores.defender?.logic ?? match.ai_scores.defender?.Logic ?? 0,
+        fullMark: 10
+      },
+      {
+        subject: 'Facts',
+        Critic: match.ai_scores.critic?.facts ?? match.ai_scores.critic?.Facts ?? 0,
+        Defender: match.ai_scores.defender?.facts ?? match.ai_scores.defender?.Facts ?? 0,
+        fullMark: 10
+      },
+      {
+        subject: 'Relevance',
+        Critic: match.ai_scores.critic?.relevance ?? match.ai_scores.critic?.Relevance ?? 0,
+        Defender: match.ai_scores.defender?.relevance ?? match.ai_scores.defender?.Relevance ?? 0,
+        fullMark: 10
+      },
+    ];
+  }, [match?.ai_scores]);
+
+  // Block the chart from re-rendering unless the data actually changes
+  const memoizedRadarChart = useMemo(() => (
+    <ResponsiveContainer width="100%" height={300}>
+      <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+        <PolarGrid stroke="#334155" />
+        <PolarAngleAxis 
+          dataKey="subject" 
+          tick={{ fill: '#94a3b8', fontSize: 14, fontWeight: 500 }} 
+        />
+        <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
+        <Radar name="Critic" dataKey="Critic" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.5} isAnimationActive={false} />
+        <Radar name="Defender" dataKey="Defender" stroke="#6366f1" fill="#6366f1" fillOpacity={0.5} isAnimationActive={false} />
+      </RadarChart>
+    </ResponsiveContainer>
+  ), [radarData]);
 
   const exportHighlight = async (index) => {
     setExportingId(index);
@@ -750,37 +791,8 @@ const MatchReview = () => {
           <h2 className="text-2xl font-bold text-center text-slate-200">AI Cognitive Analysis</h2>
 
           <div className="flex flex-col md:flex-row gap-6">
-            {/* Radar Chart */}
-            {/* Radar Chart */}
             <div className="flex-1 w-full min-h-[300px] flex items-center justify-center bg-[#0b0f19] p-4 rounded-xl border border-slate-800 shadow-lg">
-              <ResponsiveContainer width="100%" height={300}>
-                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={[
-                  {
-                    subject: 'Logic',
-                    Critic: match.ai_scores.critic?.logic ?? match.ai_scores.critic?.Logic ?? 0,
-                    Defender: match.ai_scores.defender?.logic ?? match.ai_scores.defender?.Logic ?? 0,
-                    fullMark: 10
-                  },
-                  {
-                    subject: 'Facts',
-                    Critic: match.ai_scores.critic?.facts ?? match.ai_scores.critic?.Facts ?? 0,
-                    Defender: match.ai_scores.defender?.facts ?? match.ai_scores.defender?.Facts ?? 0,
-                    fullMark: 10
-                  },
-                  {
-                    subject: 'Relevance',
-                    Critic: match.ai_scores.critic?.relevance ?? match.ai_scores.critic?.Relevance ?? 0,
-                    Defender: match.ai_scores.defender?.relevance ?? match.ai_scores.defender?.Relevance ?? 0,
-                    fullMark: 10
-                  },
-                ]}>
-                  <PolarGrid stroke="#334155" />
-                  <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 14 }} />
-                  <PolarRadiusAxis angle={30} domain={[0, 10]} tick={{ fill: '#64748b' }} />
-                  <Radar name="Critic" dataKey="Critic" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.5} />
-                  <Radar name="Defender" dataKey="Defender" stroke="#6366f1" fill="#6366f1" fillOpacity={0.5} />
-                </RadarChart>
-              </ResponsiveContainer>
+              {memoizedRadarChart}
             </div>
 
             {/* Detailed Feedback Cards */}
