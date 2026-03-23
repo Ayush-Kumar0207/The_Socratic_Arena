@@ -18,7 +18,7 @@ import { config } from 'dotenv';
 config();
 
 // FEATURE FLAG: Logic control for high-cost Gemini AI features
-const ENABLE_ADVANCED_AI = false; // Toggle to true to re-enable Highlights & Judge Intervention
+const ENABLE_ADVANCED_AI = process.env.ENABLE_ADVANCED_AI !== 'false'; // Toggle to true to re-enable Highlights & Judge Intervention
 
 import './auto_seed.js';
 

@@ -9,7 +9,7 @@ const MatchReview = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const [match, setMatch] = useState(null);
-  const ENABLE_AI_HIGHLIGHTS = false; // Toggle to true to reveal highlights section
+  const ENABLE_AI_HIGHLIGHTS = true; // Toggle to true to reveal highlights section
   const [loading, setLoading] = useState(true);
   const [hasVoted, setHasVoted] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
