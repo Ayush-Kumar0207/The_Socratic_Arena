@@ -142,7 +142,6 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 ### 📄 Post-Match Analytics
 - **Match Review** page with detailed AI scores, radar comparison charts, and bar graphs
 - **Debate transcript replay** with timed playback recreating the original pace
-- **PDF export** of debate transcripts
 - **Popular topics sidebar** for discovery after reviewing a match
 
 ---
@@ -159,7 +158,7 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 | **AI Framework** | LangChain + Google GenAI | Structured AI chains, embeddings, semantic search |
 | **Database** | Supabase (PostgreSQL) | Auth, profiles, matches, topics, votes, real-time subscriptions |
 | **Auth** | Supabase Auth | OAuth / email authentication |
-| **Export** | jsPDF, html2canvas | PDF transcript export, highlight card export |
+| **Export Tools** | html2canvas | UI snapshots and visual state capture |
 | **Routing** | React Router DOM v7 | Client-side navigation with protected routes |
 
 ---
@@ -335,6 +334,8 @@ cd frontend && npm install && npm run dev
 - [x] Match replay with timed playback
 - [x] Cognitive Profile radar charts
 - [x] Social network (follow users, see live status)
+- [ ] AI Highlights — Automatically generate and extract key turning points from debates
+- [ ] PDF or txt Export — Download professional-grade debate transcripts in PDF or txt format
 - [ ] AI Judge Lifeline — summon the AI to fact-check mid-debate
 - [ ] Tournament brackets with elimination rounds
 - [ ] Team debates (2v2)
