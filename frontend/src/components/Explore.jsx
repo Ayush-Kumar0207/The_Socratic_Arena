@@ -834,9 +834,11 @@ const Explore = ({ socket, user }) => {
                 const title = (topic.title || '').toLowerCase();
                 const isMatch = title.includes(searchQuery.toLowerCase());
                 const isBroad = broadTopicsList.includes(title);
+                const isPlayed = (topicTotals[topic.title] || 0) > 0;
+                const hasSearch = searchQuery.trim().length > 0;
                 
-                // Show ALL non-broad topics (including unplayed) — no isPlayed gate
-                return isMatch && !isBroad;
+                // Show topics only if they have been played OR if there's an active search query
+                return isMatch && !isBroad && (hasSearch || isPlayed);
               })
               .sort((a, b) => {
                 const playA = topicTotals[a.title] || 0;

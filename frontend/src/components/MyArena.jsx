@@ -340,6 +340,9 @@ const MyArena = ({ user, socket }) => {
 
       const domain = getTopicDomain(t.title).domain;
       
+      const isPlayed = (topicTotals[t.title] || 0) > 0;
+      if (!isPlayed) return false;
+
       // If we are on a specific tab, show all topics of that domain (up to 10)
       if (activeTab !== 'ALL') return domain.toLowerCase() === activeTab.toLowerCase();
       
@@ -767,7 +770,7 @@ const MyArena = ({ user, socket }) => {
           ) : (
              <div className="text-slate-500 text-sm italic p-6 border border-dashed border-slate-700/50 rounded-xl text-center bg-slate-900/20">
                {followedTopics.some(t => domainNamesLower.includes(t.title.toLowerCase())) 
-                 ? "No debates found for your followed categories in the filter."
+                 ? "No trending debates found for your followed categories in the filter."
                  : "Follow a Category (e.g. Technology, Politics) in the Discovery Hub to see trending debates here."
                }
              </div>
