@@ -15,7 +15,7 @@ import MatchReview from './components/MatchReview';
 import TopicMatches from './components/TopicMatches';
 
 // Singleton Socket (Auto-connect disabled until token is ready)
-const socket = io('http://localhost:5000', {
+const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000', {
   transports: ['websocket', 'polling'],
   autoConnect: false,
 });
