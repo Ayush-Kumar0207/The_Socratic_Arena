@@ -152,10 +152,10 @@ function CreateArenaDialog({ createTopic, setCreateTopic, createQuestion, setCre
   const navigate = useNavigate();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => createStatus !== 'creating' && setShowCreateDialog(false)}>
-      <div className="bg-[#0f172a] border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg p-8 mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => createStatus !== 'creating' && setShowCreateDialog(false)}>
+      <div className="bg-[#0f172a] border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg p-5 sm:p-8" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5 sm:mb-6">
+          <h2 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center gap-3">
             <div className="bg-gradient-to-br from-indigo-500 to-cyan-500 p-2 rounded-lg">
               <Plus className="h-5 w-5 text-white" />
             </div>
@@ -391,10 +391,10 @@ function JoinArenaDialog({ joinCode, setJoinCode, joinStatus, setJoinStatus, joi
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => joinStatus !== 'joining' && setShowJoinDialog(false)}>
-      <div className="bg-[#0f172a] border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-md p-8 mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => joinStatus !== 'joining' && setShowJoinDialog(false)}>
+      <div className="bg-[#0f172a] border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-md p-5 sm:p-8" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5 sm:mb-6">
+          <h2 className="text-xl sm:text-2xl font-extrabold text-slate-100 flex items-center gap-3">
             <div className="bg-gradient-to-br from-emerald-500 to-cyan-500 p-2 rounded-lg">
               <Link2 className="h-5 w-5 text-white" />
             </div>

@@ -1065,16 +1065,16 @@ const Explore = ({ socket, user }) => {
             <h3 className="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
                 <Search className="h-5 w-5 text-cyan-400" /> Find Debater
             </h3>
-            <form onSubmit={handleSearchUser} className="flex gap-3">
+            <form onSubmit={handleSearchUser} className="flex flex-col sm:flex-row gap-3">
                 <input
                     type="text"
                     placeholder="Enter Socratic ID (e.g. 1ab66dbc...)"
                     value={searchId}
                     onChange={(e) => setSearchId(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors"
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors text-sm sm:text-base"
                 />
-                <button type="submit" className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold rounded-xl transition-colors cursor-pointer">
-                    Search
+                <button type="submit" className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold rounded-xl transition-colors cursor-pointer text-sm sm:text-base whitespace-nowrap">
+                    Search Debater
                 </button>
             </form>
             {searchError && <p className="text-rose-500 text-sm mt-2">{searchError}</p>}
@@ -1110,11 +1110,11 @@ const Explore = ({ socket, user }) => {
                       {profile.username || profile.email?.split('@')[0] || 'Anonymous'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="hidden sm:block">
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="hidden xs:block">
                       <RankBadge elo={profile.elo_rating || 1000} />
                     </div>
-                    <div className="flex items-center gap-1.5 w-[50px] justify-end">
+                    <div className="flex items-center gap-1.5 w-[45px] sm:w-[50px] justify-end">
                       <Activity className="h-3.5 w-3.5 text-cyan-400" />
                       <span className="text-cyan-300 font-bold text-sm">{profile.elo_rating ?? 1000}</span>
                     </div>

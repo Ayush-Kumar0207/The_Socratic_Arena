@@ -448,7 +448,7 @@ const DebateArena = ({
   }
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-4 flex flex-col h-dvh overflow-hidden bg-slate-950 text-slate-200">
+    <div className="w-full max-w-5xl mx-auto px-3 sm:px-6 pt-3 sm:pt-6 pb-4 flex flex-col h-dvh overflow-hidden bg-slate-950 text-slate-200">
       {/* Pause Overlay */}
       {isPaused && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
@@ -488,18 +488,18 @@ const DebateArena = ({
       {(matchStatus === 'active' || matchStatus === 'finished') && (
         <>
           {/* Header */}
-          <div className="shrink-0 mb-2 sm:mb-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold text-slate-100">Blitz Debate Arena</h2>
-                <p className="text-sm text-slate-400 mt-0.5">
-                  You are playing as:{' '}
+          <div className="shrink-0 mb-3 sm:mb-5">
+            <div className="flex items-start justify-between gap-3 sm:gap-4">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">Blitz Debate Arena</h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Playing as:{' '}
                   <span className={`font-semibold ${playerRole === 'Critic' ? 'text-rose-300' : 'text-indigo-300'}`}>
                     {playerRole}
                   </span>
                 </p>
                 {topic && (
-                  <p className="mt-1 text-sm text-cyan-300 font-medium flex items-center gap-1.5">
+                  <p className="mt-1 text-xs sm:text-sm text-cyan-300 font-medium flex items-center gap-1.5 line-clamp-1">
                     <MessageCircle className="h-3.5 w-3.5 shrink-0" />{topic}
                   </p>
                 )}
@@ -514,19 +514,19 @@ const DebateArena = ({
           </div>
 
           {/* Timers */}
-          <div className="shrink-0 grid grid-cols-2 gap-2 sm:gap-4 mb-2 sm:mb-5">
+          <div className="shrink-0 grid grid-cols-2 gap-2 sm:gap-4 mb-3 sm:mb-5">
             <div className={`rounded-xl border-2 p-2 sm:p-4 transition-all duration-300 ${
               activeSpeaker === 'Critic'
                 ? 'border-rose-500/60 bg-rose-950/30 shadow-lg shadow-rose-500/20'
                 : 'border-slate-700/50 bg-slate-800/40'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Swords className="h-4 w-4 text-rose-300" />
-                  <span className="text-xs font-bold uppercase tracking-widest text-rose-300">Critic</span>
+              <div className="flex items-center justify-between mb-1 sm:mb-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Swords className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-rose-300" />
+                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-rose-300">Critic</span>
                 </div>
-                {activeSpeaker === 'Critic' && <div className="h-2 w-2 rounded-full bg-rose-400 animate-pulse" />}
+                {activeSpeaker === 'Critic' && <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-rose-400 animate-pulse" />}
               </div>
-              <div className={`text-2xl sm:text-4xl font-mono font-bold ${criticTime <= 15 ? 'animate-pulse text-rose-500' : criticTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
+              <div className={`text-xl sm:text-4xl font-mono font-bold ${criticTime <= 15 ? 'animate-pulse text-rose-500' : criticTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
                 {formatTime(criticTime)}
               </div>
             </div>
@@ -535,14 +535,14 @@ const DebateArena = ({
               activeSpeaker === 'Defender'
                 ? 'border-indigo-500/60 bg-indigo-950/30 shadow-lg shadow-indigo-500/20'
                 : 'border-slate-700/50 bg-slate-800/40'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-indigo-300" />
-                  <span className="text-xs font-bold uppercase tracking-widest text-indigo-300">Defender</span>
+              <div className="flex items-center justify-between mb-1 sm:mb-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300" />
+                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-indigo-300">Defender</span>
                 </div>
-                {activeSpeaker === 'Defender' && <div className="h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />}
+                {activeSpeaker === 'Defender' && <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-indigo-400 animate-pulse" />}
               </div>
-              <div className={`text-2xl sm:text-4xl font-mono font-bold ${defenderTime <= 15 ? 'animate-pulse text-rose-500' : defenderTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
+              <div className={`text-xl sm:text-4xl font-mono font-bold ${defenderTime <= 15 ? 'animate-pulse text-rose-500' : defenderTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
                 {formatTime(defenderTime)}
               </div>
             </div>
@@ -571,7 +571,7 @@ const DebateArena = ({
                   return (
                     <div key={message?.id || `${message?.speaker}-${index}`}
                       className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[72%] rounded-2xl px-5 py-4 ${
+                      <div className={`max-w-[85%] sm:max-w-[72%] rounded-2xl px-4 py-3 sm:px-5 sm:py-4 ${
                         isMe
                           ? 'bg-indigo-600 text-white rounded-br-none'
                           : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none'
@@ -659,14 +659,15 @@ const DebateArena = ({
                     rows={1}
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={handleSendMessage}
-                  disabled={!inputText.trim() || isInputDisabled}
-                  className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-5 py-3 text-sm font-semibold uppercase tracking-wide text-cyan-200 hover:border-cyan-400 hover:text-cyan-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition"
-                >
-                  <Swords className="h-4 w-4" /> Send
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleSendMessage}
+                    disabled={!inputText.trim() || isInputDisabled}
+                    className="shrink-0 inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-950/40 px-3 py-2 sm:px-5 sm:py-3 text-xs sm:text-sm font-semibold uppercase tracking-wide text-cyan-200 hover:border-cyan-400 hover:text-cyan-100 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition"
+                  >
+                    <Swords className="h-4 w-4 hidden sm:inline" /> 
+                    <span>Send</span>
+                  </button>
               </div>
             </div>
           )}
