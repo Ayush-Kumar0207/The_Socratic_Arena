@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { supabase } from './lib/supabaseClient';
@@ -96,7 +96,6 @@ const App = () => {
         joinFeedback={joinFeedback}
         setJoinFeedback={setJoinFeedback}
         setShowJoinDialog={setShowJoinDialog}
-        socket={socket}
         userId={session?.user?.id}
       />}
 
@@ -343,7 +342,7 @@ function CreateArenaDialog({ createTopic, setCreateTopic, createQuestion, setCre
 // --- Join Arena Dialog Component ---
 import { Link2 } from 'lucide-react';
 
-function JoinArenaDialog({ joinCode, setJoinCode, joinStatus, setJoinStatus, joinFeedback, setJoinFeedback, setShowJoinDialog, socket, userId }) {
+function JoinArenaDialog({ joinCode, setJoinCode, joinStatus, setJoinStatus, joinFeedback, setJoinFeedback, setShowJoinDialog, userId }) {
   const navigate = useNavigate();
 
   const handleJoin = async () => {
@@ -459,3 +458,4 @@ function JoinArenaDialog({ joinCode, setJoinCode, joinStatus, setJoinStatus, joi
     </div>
   );
 }
+

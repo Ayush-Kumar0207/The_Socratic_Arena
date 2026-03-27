@@ -188,22 +188,8 @@ async function resolveMatch(matchId) {
       return;
     }
 
-    // *** CRITICAL: Update match status to 'completed' FIRST to prevent re-processing ***
-    const { error: matchUpdateError } = await supabase
-      .from('matches')
-      .update({ status: 'completed' })
-      .eq('id', matchId)
-      .eq('status', 'pending_votes'); // Optimistic lock: only update if still pending
-
-    if (matchUpdateError) {
-      console.error(`[Timer Resolution] FAILED to update match status for ${matchId}:`, matchUpdateError.message);
-      return;
-    }
-    console.log(`[Timer Resolution] Match ${matchId} status set to 'completed'.`);
-
-    // 2. Calculate scores — handle missing AI scores gracefully
+    // 2. Calculate scores BEFORE status update — handle missing AI scores gracefully
     const hasAiScores = latestMatch.ai_scores && latestMatch.ai_scores.critic && latestMatch.ai_scores.defender;
-
     const criticVotes = latestMatch.audience_votes_critic || 0;
     const defenderVotes = latestMatch.audience_votes_defender || 0;
     const totalVotes = criticVotes + defenderVotes;
@@ -228,6 +214,28 @@ async function resolveMatch(matchId) {
     } else {
       sCritic = 0.5; sDefender = 0.5; winnerId = null;
     }
+
+    // *** CRITICAL: Update match status to 'completed' AND persist winner_id ***
+    // We try to update with winner_id, but fallback if the column is missing in the DB
+    const finalUpdateData = { status: 'completed' };
+    if (winnerId) finalUpdateData.winner_id = winnerId;
+
+    const { error: matchUpdateError } = await supabase
+      .from('matches')
+      .update(finalUpdateData)
+      .eq('id', matchId)
+      .eq('status', 'pending_votes'); // Optimistic lock
+
+    if (matchUpdateError) {
+      if (matchUpdateError.message.includes('winner_id')) {
+        console.warn(`[Timer Resolution] winner_id persistence failed (column missing). Retrying with status only.`);
+        await supabase.from('matches').update({ status: 'completed' }).eq('id', matchId).eq('status', 'pending_votes');
+      } else {
+        console.error(`[Timer Resolution] FAILED to update match status for ${matchId}:`, matchUpdateError.message);
+        return;
+      }
+    }
+    console.log(`[Timer Resolution] Match ${matchId} status set to 'completed' (Winner: ${winnerId}).`);
 
 
 
@@ -606,6 +614,15 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
 
   console.log(`[resolve_abandoned] Match ${matchId} abandoned by ${leaverRole} (${leaverId}). Duration: ${matchDuration}s. Transcript: ${savedTranscript.length} messages.`);
 
+  // Notify participants in the match room immediately that the match is PAUSING/ENDING
+  io.to(matchId).emit('opponent_disconnected', {
+    type: 'abandoned',
+    leaverRole: leaverRole === 'critic' ? 'Critic' : 'Defender',
+    leaverUserId: leaverId,
+    message: `${leaverRole === 'critic' ? 'Critic' : 'Defender'} failed to reconnect. Match abandoned.`,
+    redirectDelay: 3000
+  });
+
   try {
     // 1. Fetch Profiles securely
     const { data: profiles, error: fetchErr } = await supabase.from('profiles').select('*').in('id', [leaverId, stayerId]);
@@ -665,13 +682,21 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
       updatePromises.push(supabase.from('profiles').update({ elo_rating: newStayerRating }).eq('id', stayerId));
     }
 
-    updatePromises.push(
-      supabase.from('matches').update({
-        status: 'abandoned',
-        winner_id: stayerProfile.id ? stayerId : null,
-        transcript: savedTranscript
-      }).eq('id', matchId)
-    );
+    // Try to update with winner_id, but fallback if the column is missing in the DB
+    const matchUpdateData = {
+      status: 'abandoned',
+      transcript: savedTranscript
+    };
+    if (stayerProfile.id) matchUpdateData.winner_id = stayerId;
+
+    const { error: matchErr } = await withTimeout(supabase.from('matches').update(matchUpdateData).eq('id', matchId), 10000);
+    
+    if (matchErr && matchErr.message.includes('winner_id')) {
+      console.warn(`[resolve_abandoned] Restoration of winner_id failed (column likely missing). Retrying with status only.`);
+      await withTimeout(supabase.from('matches').update({ status: 'abandoned', transcript: savedTranscript }).eq('id', matchId), 10000);
+    } else if (matchErr) {
+      console.error(`[resolve_abandoned] Match update Error:`, matchErr);
+    }
 
     const results = await Promise.all(updatePromises);
     results.forEach((r, idx) => {
@@ -679,31 +704,24 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     });
 
     console.log(`[resolve_abandoned] Match ${matchId} resolved as ABANDONED. Leaver: ${newLeaverRating}, Stayer: ${newStayerRating}`);
+
+    // Broadcast globally ONLY AFTER DB update is successful to avoid race conditions with polling
+    io.emit('match_ended', { matchId });
+
   } catch (err) {
     console.error('[resolve_abandoned] Error:', err);
     // Last-resort failsafe: Even if Elo calc fails, STILL update the DB status so it's not stuck as 'active'
     try {
       await supabase.from('matches').update({ status: 'abandoned', transcript: savedTranscript }).eq('id', matchId).eq('status', 'active');
+      // Still emit even in failsafe path
+      io.emit('match_ended', { matchId });
     } catch (e2) {
       console.error('[resolve_abandoned] Failsafe DB update also failed:', e2);
     }
+  } finally {
+    // 6. Final Memory Purge
+    cleanupRoom(matchId);
   }
-
-  // 5. EMIT ALL EVENTS *BEFORE* cleanupRoom — the room still exists at this point
-  // Notify participants in the match room
-  io.to(matchId).emit('opponent_disconnected', {
-    type: 'abandoned',
-    leaverRole: leaverRole === 'critic' ? 'Critic' : 'Defender',
-    leaverUserId: leaverId,
-    message: `${leaverRole === 'critic' ? 'Critic' : 'Defender'} failed to reconnect. Match abandoned.`,
-    redirectDelay: 3000
-  });
-
-  // Broadcast globally so ALL Explore pages remove this match from "Live Arenas" instantly
-  io.emit('match_ended', { matchId });
-
-  // 6. NOW it's safe to clean up — all events have been sent
-  cleanupRoom(matchId);
 };
 
 /**
@@ -857,13 +875,13 @@ io.on('connection', (socket) => {
 
       let roomId;
       try {
-        const { data, error } = await supabase.from('matches').insert({
+        const { data, error } = await withTimeout(supabase.from('matches').insert({
           topic: topicTitle,
           topic_title: topicTitle,
           status: 'active',
           critic_id: critic.userId,
           defender_id: defender.userId
-        }).select().single();
+        }).select().single(), 10000);
         if (error) throw error;
         roomId = data.id;
       } catch (err) {
@@ -1225,6 +1243,16 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
   }
 
   /**
+   * Helper to wrap Supabase calls with a timeout
+   */
+  async function withTimeout(promise, timeoutMs = 8000) {
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database request timeout')), timeoutMs)
+    );
+    return Promise.race([promise, timeout]);
+  }
+
+  /**
    * create_private_arena — Auto-called when a user enters the lobby.
    * Creates a row in private_arenas and returns the arena code.
    */
@@ -1235,23 +1263,23 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       let attempts = 0;
       while (attempts < 5) {
         arenaCode = generateArenaCode(userId);
-        const { data: existing } = await supabase
+        const { data: existing } = await withTimeout(supabase
           .from('private_arenas')
           .select('id')
           .eq('arena_code', arenaCode)
           .eq('status', 'waiting')
-          .single();
+          .single(), 5000).catch(() => ({ data: null })); // treat timeout as not-found for safety
         if (!existing) break;
         attempts++;
       }
 
-      const { data, error } = await supabase.from('private_arenas').insert({
+      const { data, error } = await withTimeout(supabase.from('private_arenas').insert({
         arena_code: arenaCode,
         topic_id: topicId,
         topic_title: topicTitle,
         creator_id: userId,
         status: 'waiting'
-      }).select().single();
+      }).select().single(), 10000);
 
       if (error) throw error;
 
@@ -1365,13 +1393,13 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       const defenderUserId = creatorRole === 'Defender' ? arena.creator_id : arena.joiner_id;
 
       // Create match
-      const { data: matchData, error: matchError } = await supabase.from('matches').insert({
+      const { data: matchData, error: matchError } = await withTimeout(supabase.from('matches').insert({
         topic: arena.topic_title,
         topic_title: arena.topic_title,
         status: 'active',
         critic_id: criticUserId,
         defender_id: defenderUserId
-      }).select().single();
+      }).select().single(), 10000);
       if (matchError) throw matchError;
 
       const roomId = matchData.id;

@@ -6,7 +6,12 @@ import { ArrowLeft, Vote, Activity, Layers, Play, Clock, Swords } from 'lucide-r
 const TopicMatches = ({ socket, user }) => {
   const { topicTitle } = useParams();
   const navigate = useNavigate();
-  const [matches, setMatches] = useState([]);
+  const decodedTitle = decodeURIComponent(topicTitle);
+  const [matches, setMatches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`topic_matches_${decodedTitle}`)) || []; } catch { return []; }
+  });
+  const [endedMatchIds, setEndedMatchIds] = useState(new Set());
+  const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [topicDbEntry, setTopicDbEntry] = useState(null);
@@ -21,8 +26,6 @@ const TopicMatches = ({ socket, user }) => {
     const s = Math.floor((diff % (1000 * 60)) / 1000);
     return { expired: false, text: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` };
   };
-
-  const decodedTitle = decodeURIComponent(topicTitle);
 
   useEffect(() => {
     const fetchMatches = async () => {
@@ -71,7 +74,8 @@ const TopicMatches = ({ socket, user }) => {
           });
         }
 
-        setMatches(matchesData);
+        const filteredData = (matchesData || []).filter(m => !endedMatchIds.has(m.id));
+        setMatches(filteredData);
       } catch (err) {
         console.error('Error fetching matches for topic:', err);
       } finally {
@@ -81,24 +85,41 @@ const TopicMatches = ({ socket, user }) => {
 
     if (decodedTitle) fetchMatches();
 
-    const channel = supabase
-      .channel(`topic_matches_${decodedTitle}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'matches',
-          filter: `topic_title=eq.${decodedTitle}`,
-        },
-        () => fetchMatches()
-      )
-      .subscribe();
+    const handleMatchEnded = ({ matchId }) => {
+      console.log(`[TopicMatches] match_ended received for ${matchId}. Removing from local state.`);
+      
+      // Mark as ended locally to prevent it from being re-added by fetchMatches for the next 15 seconds
+      setEndedMatchIds(prev => {
+        const next = new Set(prev);
+        next.add(matchId);
+        return next;
+      });
+
+      // Cleanup: remove from endedMatchIds after 15s
+      setTimeout(() => {
+        setEndedMatchIds(prev => {
+          const next = new Set(prev);
+          next.delete(matchId);
+          return next;
+        });
+      }, 15000);
+
+      setMatches(prev => prev.filter(m => m.id !== matchId));
+    };
+
+    if (socket) {
+      socket.on('match_ended', handleMatchEnded);
+    }
+
+    const interval = setInterval(fetchMatches, 30000);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (socket) {
+        socket.off('match_ended', handleMatchEnded);
+      }
+      clearInterval(interval);
     };
-  }, [decodedTitle]);
+  }, [decodedTitle, socket]);
 
   // Timer tick for countdown clocks
   useEffect(() => {

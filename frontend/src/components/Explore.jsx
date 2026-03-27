@@ -12,6 +12,7 @@ const Explore = ({ socket, user }) => {
   const [deliberatingMatches, setDeliberatingMatches] = useState(() => JSON.parse(localStorage.getItem('explore_deliberating')) || []);
   const [completedMatches, setCompletedMatches] = useState(() => JSON.parse(localStorage.getItem('explore_completed')) || []);
   const [liveMatches, setLiveMatches] = useState(() => JSON.parse(localStorage.getItem('explore_live')) || []);
+  const [endedMatchIds, setEndedMatchIds] = useState(new Set());
   const [activeUserCounts, setActiveUserCounts] = useState(() => JSON.parse(localStorage.getItem('explore_counts')) || {});
   const [leaderboard, setLeaderboard] = useState(() => JSON.parse(localStorage.getItem('explore_leaderboard')) || []);
   const [searchQuery, setSearchQuery] = useState('');
@@ -132,7 +133,8 @@ const Explore = ({ socket, user }) => {
         const filteredLive = data.filter(match => {
           const createdAt = new Date(match.created_at);
           const ageInMinutes = (now - createdAt) / (1000 * 60);
-          return ageInMinutes < 15;
+          // Filter out matches older than 15 mins OR matches we know have ended
+          return ageInMinutes < 15 && !endedMatchIds.has(match.id);
         });
 
         setLiveMatches(filteredLive);
@@ -154,7 +156,7 @@ const Explore = ({ socket, user }) => {
         const { data, error } = await supabase
           .from('matches')
           .select('topic_title, status')
-          .in('status', ['active', 'completed', 'pending_votes']);
+          .in('status', ['active', 'completed', 'pending_votes', 'abandoned']);
         
         if (error) throw error;
         
@@ -190,24 +192,34 @@ const Explore = ({ socket, user }) => {
     fetchTopicTotals();
     fetchFollows();
 
-    const interval = setInterval(fetchLive, 5000);
+    const interval = setInterval(fetchLive, 30000);
     const timerInterval = setInterval(() => setCurrentTime(new Date()), 1000);
 
     // Real-time listener: Instantly remove ended matches from Live Arenas
     const handleMatchEnded = ({ matchId }) => {
       console.log(`[Explore] match_ended received for ${matchId}. Removing from Live Arenas.`);
+      
+      // Mark as ended locally to prevent it from being re-added by fetchLive for the next 15 seconds
+      setEndedMatchIds(prev => {
+        const next = new Set(prev);
+        next.add(matchId);
+        return next;
+      });
+
+      // Simple cleanup: remove from endedMatchIds after 15s
+      setTimeout(() => {
+        setEndedMatchIds(prev => {
+          const next = new Set(prev);
+          next.delete(matchId);
+          return next;
+        });
+      }, 15000);
+
       setLiveMatches(prev => {
-        const updated = prev.filter(m => m.id !== matchId);
+        const updated = (prev || []).filter(m => m.id !== matchId);
         localStorage.setItem('explore_live', JSON.stringify(updated));
         return updated;
       });
-      // Also recalculate active user counts
-      setActiveUserCounts(prev => {
-        const newCounts = { ...prev };
-        // We don't know the topic here, so just re-derive from the updated list on next fetch
-        return newCounts;
-      });
-      // Re-fetch deliberating since the match may now be in pending_votes or abandoned
       fetchDeliberating();
     };
 
@@ -219,11 +231,10 @@ const Explore = ({ socket, user }) => {
       clearInterval(interval);
       clearInterval(timerInterval);
       if (socket) {
-        socket.off('new_topic_added', fetchTopics);
         socket.off('match_ended', handleMatchEnded);
       }
     };
-  }, []); // Dependency array changed from [socket, user] to []
+  }, [socket, user]);
 
   useEffect(() => {
     if (!socket || !user) return;

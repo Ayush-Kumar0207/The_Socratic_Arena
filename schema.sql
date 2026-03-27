@@ -67,13 +67,13 @@ BEGIN
     -- 1. Get current Elo
     SELECT elo_rating INTO v_elo FROM profiles WHERE id = p_user_id;
     
-    -- 2. Count all completed/abandoned matches where user participated
+    -- 2. Count all completed/abandoned/voting matches where user participated
     SELECT count(*) INTO v_matches 
     FROM matches 
     WHERE (critic_id = p_user_id OR defender_id = p_user_id)
-    AND status IN ('completed', 'abandoned');
+    AND status IN ('completed', 'abandoned', 'pending_votes', 'voting');
 
-    -- 3. Count wins
+    -- 3. Count wins (only for resolved matches)
     SELECT count(*) INTO v_wins
     FROM matches
     WHERE winner_id = p_user_id
