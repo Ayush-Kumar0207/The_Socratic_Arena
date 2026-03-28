@@ -154,10 +154,11 @@ const DebateArena = ({
     isListening,
     interimText,
     audioStream,
-    error: voiceError,
+    voiceError,
     isSupported: voiceSupported,
     startListening,
     stopListening: stopVoice,
+    volume,
   } = useVoiceRecognition({
     onSubmit: handleVoiceSubmit,
     onClear: handleVoiceClear,
@@ -862,7 +863,7 @@ const DebateArena = ({
                 {/* Voice Orb */}
                 {voiceSupported && (
                   <VoiceOrb
-                    audioStream={audioStream}
+                    volume={volume}
                     isListening={isListening}
                     isMyTurn={isMyTurn}
                     isDisabled={matchStatus !== 'active'}

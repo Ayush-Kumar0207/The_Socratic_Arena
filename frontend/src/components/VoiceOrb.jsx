@@ -14,7 +14,7 @@ import { Mic, MicOff, Lock } from 'lucide-react';
  *  ⚫ Standby (not listening)         — Muted, subtle breathing animation
  */
 const VoiceOrb = ({
-  audioStream,        // MediaStream from useVoiceRecognition
+  volume = 0,         // New: Normalized volume (0-1) from hook
   isListening,        // Whether the mic is currently active
   isMyTurn,           // Whether it's the current user's turn
   isDisabled,         // Full disable (e.g., spectator or match over)
@@ -23,98 +23,7 @@ const VoiceOrb = ({
   scratchpadText,     // Scratchpad text (shown in locked mode)
   error,              // Error message from voice recognition
 }) => {
-  const canvasRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const sourceRef = useRef(null);
-  const animationRef = useRef(null);
-  const [volume, setVolume] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
-
-  // ── SAFETY NET #1: AudioContext lifecycle with full cleanup ──
-  useEffect(() => {
-    if (!audioStream || !isListening) {
-      // Cleanup when stream goes away or listening stops
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-      if (sourceRef.current) {
-        try { sourceRef.current.disconnect(); } catch (e) { /* noop */ }
-        sourceRef.current = null;
-      }
-      if (audioContextRef.current) {
-        try { audioContextRef.current.close(); } catch (e) { /* noop */ }
-        audioContextRef.current = null;
-      }
-      analyserRef.current = null;
-      setVolume(0);
-      return;
-    }
-
-    // Create AudioContext + AnalyserNode
-    let audioContext;
-    try {
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    } catch (e) {
-      console.warn('[VoiceOrb] AudioContext not available:', e);
-      return;
-    }
-    audioContextRef.current = audioContext;
-
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.8;
-    analyserRef.current = analyser;
-
-    let source;
-    try {
-      source = audioContext.createMediaStreamSource(audioStream);
-      source.connect(analyser);
-      sourceRef.current = source;
-    } catch (e) {
-      console.warn('[VoiceOrb] Failed to connect audio source:', e);
-      return;
-    }
-
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-
-    // Animation loop — reads frequency data every frame
-    const animate = () => {
-      analyser.getByteFrequencyData(dataArray);
-      
-      // Compute normalized volume (0–1) from average of frequency bins
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
-      }
-      const avg = sum / bufferLength;
-      const normalizedVolume = Math.min(avg / 128, 1); // 0–1 range
-      
-      setVolume(normalizedVolume);
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-
-    // ── CLEANUP: Release audio hardware on unmount or stream change ──
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-      if (source) {
-        try { source.disconnect(); } catch (e) { /* noop */ }
-      }
-      sourceRef.current = null;
-      analyserRef.current = null;
-      if (audioContext && audioContext.state !== 'closed') {
-        audioContext.close().catch(() => { /* noop */ });
-      }
-      audioContextRef.current = null;
-    };
-  }, [audioStream, isListening]);
 
   // Derive visual state
   const isActive = isListening && isMyTurn;

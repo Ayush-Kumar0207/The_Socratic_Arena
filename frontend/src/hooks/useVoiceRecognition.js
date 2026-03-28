@@ -319,6 +319,7 @@ export default function useVoiceRecognition({
   const [isListening, setIsListening] = useState(false);
   const [interimText, setInterimText] = useState('');
   const [audioStream, setAudioStream] = useState(null);
+  const [volume, setVolume] = useState(0); // New: Direct volume stream for VoiceOrb
   const [error, setError] = useState(null);
   const [isSupported] = useState(!!SpeechRecognitionAPI);
 
@@ -327,6 +328,8 @@ export default function useVoiceRecognition({
   const isListeningRef = useRef(false);
   const streamRef = useRef(null);
   const restartTimerRef = useRef(null);
+  const volumeAnimationRef = useRef(null); // New: Animation loop for volume
+  const linguisticPulseRef = useRef(0); // New: For simulated volume on iOS
 
   // ── Acoustic-Semantic Lock: The Three Dimensional Trackers ──
 
@@ -364,7 +367,16 @@ export default function useVoiceRecognition({
    * Returns a normalized 0–1 value, or -1 if unavailable.
    */
   const sampleCurrentEnergy = useCallback(() => {
-    if (!analyserRef.current) return -1;
+    if (!analyserRef.current) {
+      // FALLBACK: Linguistic Drive (Simulated volume based on transcript activity)
+      // This ensures the VoiceOrb still moves on platforms that block concurrent mic access.
+      const pulse = linguisticPulseRef.current;
+      if (pulse > 0) {
+        linguisticPulseRef.current = Math.max(0, pulse - 0.05); // Decay
+      }
+      return linguisticPulseRef.current;
+    }
+
     const analyser = analyserRef.current;
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
@@ -374,7 +386,8 @@ export default function useVoiceRecognition({
     for (let i = 0; i < bufferLength; i++) {
       sum += dataArray[i];
     }
-    return (sum / bufferLength) / 128; // Normalize to 0–1
+    const avg = sum / bufferLength;
+    return Math.min(avg / 128, 1); // Normalize to 0–1
   }, []);
 
   /**
@@ -402,15 +415,14 @@ export default function useVoiceRecognition({
   }, [sampleCurrentEnergy]);
 
   // ── Stable callback refs (prevent stale closures in event listeners) ──
-  const onSubmitRef = useRef(onSubmit);
-  const onClearRef = useRef(onClear);
-  const onObjectionRef = useRef(onObjection);
-  const onTranscriptChunkRef = useRef(onTranscriptChunk);
-
   useEffect(() => { onSubmitRef.current = onSubmit; }, [onSubmit]);
   useEffect(() => { onClearRef.current = onClear; }, [onClear]);
   useEffect(() => { onObjectionRef.current = onObjection; }, [onObjection]);
-  useEffect(() => { onTranscriptChunkRef.current = onTranscriptChunk; }, [onTranscriptChunk]);
+  useEffect(() => { onTranscriptChunkRef.current = (data) => {
+    // Trigger "Linguistic Pulse" to ensure Orb moves even if raw audio is blocked by OS
+    linguisticPulseRef.current = 0.4 + Math.random() * 0.3;
+    onTranscriptChunk(data);
+  }; }, [onTranscriptChunk]);
 
   useEffect(() => { isListeningRef.current = isListening; }, [isListening]);
 
@@ -635,6 +647,11 @@ export default function useVoiceRecognition({
 
   /** Release the microphone MediaStream. */
   const releaseStream = useCallback(() => {
+    if (volumeAnimationRef.current) {
+      cancelAnimationFrame(volumeAnimationRef.current);
+      volumeAnimationRef.current = null;
+    }
+
     // Tear down Phase 5 audio analysis
     if (audioSourceRef.current) {
       try { audioSourceRef.current.disconnect(); } catch (e) { /* noop */ }
@@ -646,6 +663,7 @@ export default function useVoiceRecognition({
     audioContextRef.current = null;
     analyserRef.current = null;
     energySamplesRef.current = [];
+    setVolume(0);
 
     // Release mic hardware
     if (streamRef.current) {
@@ -662,25 +680,44 @@ export default function useVoiceRecognition({
   const initAudioAnalysis = useCallback((stream) => {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // CRITICAL FOR MOBILE: Always attempt to resume context on creation
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.85;
 
       const source = audioCtx.createMediaStreamSource(stream);
       source.connect(analyser);
-      // NOTE: We intentionally do NOT connect analyser to audioCtx.destination
-      // so the mic audio is not played back through the speakers.
 
       audioContextRef.current = audioCtx;
       analyserRef.current = analyser;
       audioSourceRef.current = source;
       energySamplesRef.current = [];
 
-      console.log('[Voice:P5] AudioContext + AnalyserNode initialized for energy tracking.');
+      // Start the volume tracking loop
+      const updateVolume = () => {
+        if (!isListeningRef.current) return;
+        setVolume(sampleCurrentEnergy());
+        volumeAnimationRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+
+      console.log('[Voice:P5] Audio Sovereign initialized: AudioContext + AnalyserNode.');
     } catch (e) {
-      console.warn('[Voice:P5] Web Audio API unavailable — Phase 5 energy check disabled:', e.message);
+      console.warn('[Voice:P5] Web Audio API restricted — using Linguistic Drive fallback:', e.message);
+      // Start a fallback linguistic loop if raw audio is blocked
+      const updateFallbackVolume = () => {
+        if (!isListeningRef.current) return;
+        setVolume(sampleCurrentEnergy());
+        volumeAnimationRef.current = requestAnimationFrame(updateFallbackVolume);
+      };
+      updateFallbackVolume();
     }
-  }, []);
+  }, [sampleCurrentEnergy]);
 
   /** Create a fresh SpeechRecognition instance and start listening. */
   const createAndStartRecognition = useCallback(() => {
@@ -800,22 +837,41 @@ export default function useVoiceRecognition({
 
     setError(null);
 
-    // Request microphone permission with autoGainControl disabled
+    // Tiered Browser-Agnostic Mic Request (Failsafe constraints for mobile compatibility)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { 
-          autoGainControl: false,
-          echoCancellation: true,
-          noiseSuppression: true 
-        } 
-      });
+      // Layer 1: Best - Full processing (May fail on some Android/iOS drivers)
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true } 
+        });
+      } catch (e) {
+        console.warn('[Voice] Tier 1 mic request failed, dropping autoGainControl...');
+        // Layer 2: Standard - Basic echo/noise suppression
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: true, noiseSuppression: true } 
+          });
+        } catch (e2) {
+          console.warn('[Voice] Tier 2 mic request failed, requesting raw audio...');
+          // Layer 3: Failsafe - Raw mono audio
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      }
+      
       streamRef.current = stream;
       setAudioStream(stream);
 
-      // Initialize Phase 5 audio analysis on the acquired stream
-      initAudioAnalysis(stream);
+      // MOBILE FIX: Short delay to let the OS audio hardware settle 
+      // before starting transcription engine (resolves iOS conflict)
+      setTimeout(() => {
+        if (isListeningRef.current) initAudioAnalysis(stream);
+      }, 250);
+
     } catch (err) {
-      setError(`Mic Permission Required: ${err.message}`);
+      setError(`Mic Access Denied: ${err.message}`);
+      setIsListening(false);
+      isListeningRef.current = false;
       return;
     }
 
@@ -851,6 +907,7 @@ export default function useVoiceRecognition({
     isListening,
     interimText,
     audioStream,
+    volume,
     error,
     isSupported,
     startListening,
