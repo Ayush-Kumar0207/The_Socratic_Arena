@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://the-socratic-arena.vercel.app"><img src="https://img.shields.io/badge/🌐_Live-the--socratic--arena.vercel.app-000?style=for-the-badge&labelColor=000" alt="Live Website" /></a>
+  <a href="https://socratic-arena.vercel.app"><img src="https://img.shields.io/badge/🌐_Live-socratic--arena.vercel.app-000?style=for-the-badge&labelColor=000" alt="Live Website" /></a>
 </p>
 
 <p align="center">
@@ -30,14 +30,14 @@
 ## 🔴 Live Demo
 
 <p align="center">
-  <a href="https://the-socratic-arena.vercel.app">
-    <img src="https://img.shields.io/badge/▶_ENTER_THE_ARENA-the--socratic--arena.vercel.app-6366f1?style=for-the-badge&logoColor=white" alt="Live Demo" />
+  <a href="https://socratic-arena.vercel.app">
+    <img src="https://img.shields.io/badge/▶_ENTER_THE_ARENA-socratic--arena.vercel.app-6366f1?style=for-the-badge&logoColor=white" alt="Live Demo" />
   </a>
 </p>
 
 | | |
 |---|---|
-| **Production URL** | [the-socratic-arena.vercel.app](https://the-socratic-arena.vercel.app) |
+| **Production URL** | [socratic-arena.vercel.app](https://socratic-arena.vercel.app) |
 | **Frontend Host** | Vercel |
 | **Backend Host** | Render |
 | **Database** | Supabase (PostgreSQL) |
