@@ -23,10 +23,10 @@ const OfflineToast = ({ session }) => {
     }
   }, [session]);
 
-  // 2. THE LIFECYCLE: Standard 5s unmount
+  // 2. THE LIFECYCLE: Standard 7s unmount (matched to CSS)
   useEffect(() => {
     if (isVisible) {
-      const timer = setTimeout(() => setIsVisible(false), 5000);
+      const timer = setTimeout(() => setIsVisible(false), 7000);
       return () => clearTimeout(timer);
     }
   }, [isVisible]);
