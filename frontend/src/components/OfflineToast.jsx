@@ -4,12 +4,15 @@ import { Zap } from 'lucide-react';
 const OfflineToast = ({ session }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [isFading, setIsFading] = useState(false);
-  const lastSessionId = useRef(null);
+  const hasTriggered = useRef(false);
 
   useEffect(() => {
-    // TRIGGER: Only fire when the session is newly established/changed
-    if (session?.user?.id && session.user.id !== lastSessionId.current) {
-      lastSessionId.current = session.user.id;
+    // TRIGGER: Only if there's a session AND we haven't shown it in this browser tab yet
+    const isSessionInStorage = sessionStorage.getItem('hasSeenNeuralLinkThisSession');
+
+    if (session && !isSessionInStorage && !hasTriggered.current) {
+      hasTriggered.current = true;
+      sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
       
       setIsVisible(true);
       setIsFading(false);
@@ -24,12 +27,15 @@ const OfflineToast = ({ session }) => {
         clearTimeout(exitTimer);
         clearTimeout(unmountTimer);
       };
-    } else if (!session) {
-      // RESET: Allow it to fire again if the user logs out and back in
-      lastSessionId.current = null;
+    }
+    
+    // Reset if user logs out (so it can show when they log back in)
+    if (!session) {
+      sessionStorage.removeItem('hasSeenNeuralLinkThisSession');
+      hasTriggered.current = false;
       setIsVisible(false);
     }
-  }, [session, isVisible]);
+  }, [session]);
 
   if (!isVisible) return null;
 
