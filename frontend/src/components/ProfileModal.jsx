@@ -188,11 +188,11 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             topicTitle: selectedTopic.title,
             challengerStance: selectedStance
         });
-        // Safety timeout: reset spinner if no response in 10s
+        // Safety timeout: reset spinner if no response in 20s (accounts for Render cold starts)
         challengeTimeoutRef.current = setTimeout(() => {
             setChallengStatus('error');
-            setChallengeFeedback('Challenge timed out. Please try again.');
-        }, 10000);
+            setChallengeFeedback('Server took too long to respond. Please try again.');
+        }, 20000);
     };
 
     const filteredTopics = topics.filter(t =>
