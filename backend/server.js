@@ -1959,23 +1959,29 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           }
         });
 
-        // --- Update the original challenge_invite notification to act as a receipt ---
-        const { data: userNotifs } = await supabase.from('notifications')
+        // --- Transform the original challenge_invite notification to challenge_accepted receipt ---
+        const { data: inviteNotif } = await supabase.from('notifications')
           .select('id, metadata')
           .eq('user_id', userId)
-          .eq('type', 'challenge_invite');
+          .eq('type', 'challenge_invite')
+          .filter('metadata->>challenge_id', 'eq', challengeId)
+          .maybeSingle();
           
-        if (userNotifs) {
-          const invite = userNotifs.find(n => n.metadata?.challenge_id === challengeId);
-          if (invite) {
-            await supabase.from('notifications').update({
-              type: 'challenge_accepted',
-              title: 'Challenge Accepted',
-              message: `You accepted the challenge from ${challengerName} for "${challenge.topic_title}".`,
-              is_read: true
-            }).eq('id', invite.id);
-            console.log(`[Challenge] Transformed original challenge_invite notification (ID: ${invite.id}) to receipt for user ${userId}`);
-          }
+        if (inviteNotif) {
+          await supabase.from('notifications').update({
+            type: 'challenge_accepted',
+            title: 'Challenge Accepted',
+            message: `You accepted the challenge from ${challengerName} for "${challenge.topic_title}".`,
+            is_read: true,
+            metadata: {
+              ...inviteNotif.metadata,
+              arena_id: arena.id,
+              arena_code: challenge.arena_code
+            }
+          }).eq('id', inviteNotif.id);
+          console.log(`[Challenge] Transformed invite notification ${inviteNotif.id} to accepted for user ${userId}`);
+        } else {
+          console.warn(`[Challenge] Could not find invite notification to transform for user ${userId}, challenge ${challengeId}`);
         }
 
         // --- Emit to both users ---
@@ -2010,23 +2016,26 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           metadata: { challenge_id: challengeId, topic_title: challenge.topic_title }
         });
 
-        // --- Update the original challenge_invite notification to act as a receipt ---
-        const { data: userNotifs } = await supabase.from('notifications')
+        // --- Transform the original challenge_invite notification to challenge_declined receipt ---
+        const { data: inviteNotif } = await supabase.from('notifications')
           .select('id, metadata')
           .eq('user_id', userId)
-          .eq('type', 'challenge_invite');
+          .eq('type', 'challenge_invite')
+          .filter('metadata->>challenge_id', 'eq', challengeId)
+          .maybeSingle();
           
-        if (userNotifs) {
-          const invite = userNotifs.find(n => n.metadata?.challenge_id === challengeId);
-          if (invite) {
-            await supabase.from('notifications').update({
-              type: 'challenge_declined',
-              title: 'Challenge Declined',
-              message: `You declined the challenge from ${challengerName} for "${challenge.topic_title}".`,
-              is_read: true
-            }).eq('id', invite.id);
-            console.log(`[Challenge] Transformed original challenge_invite notification (ID: ${invite.id}) to receipt for user ${userId}`);
-          }
+        if (inviteNotif) {
+          await supabase.from('notifications').update({
+            type: 'challenge_declined',
+            title: 'Challenge Declined',
+            message: `You declined the challenge from ${challengerName} for "${challenge.topic_title}".`,
+            is_read: true,
+            metadata: {
+              ...inviteNotif.metadata,
+              status: 'declined'
+            }
+          }).eq('id', inviteNotif.id);
+          console.log(`[Challenge] Transformed invite notification ${inviteNotif.id} to declined for user ${userId}`);
         }
 
         emitToUser(challenge.challenger_id, 'challenge_declined', {
