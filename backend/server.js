@@ -2105,6 +2105,35 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
   });
 
   /**
+   * clear_notifications — Delete specific notifications or all notifications for a user
+   */
+  socket.on('clear_notifications', async ({ notificationIds }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      if (!notificationIds || !Array.isArray(notificationIds) || notificationIds.length === 0) {
+        // Clear ALL notifications for this user
+        await supabase.from('notifications').delete().eq('user_id', userId);
+      } else {
+        // Clear specific notifications
+        await supabase.from('notifications').delete().in('id', notificationIds).eq('user_id', userId);
+      }
+      
+      // Re-fetch and emit the updated list
+      const { data } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+        
+      socket.emit('notifications_list', { notifications: data || [] });
+      console.log(`[Notifications] Cleared ${notificationIds?.length || 'ALL'} notifications for user ${userId}`);
+    } catch (err) {
+      console.error('[Notifications] clear error:', err);
+    }
+  });
+
+  /**
    * Handle disconnection
    */
   socket.on('disconnect', async (reason) => {

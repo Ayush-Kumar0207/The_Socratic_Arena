@@ -22,6 +22,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = useRef(null);
     const challengeContainerRef = useRef(null);
+    const challengeTimeoutRef = useRef(null);
 
     // Determine which user to display
     const activeUser = viewUser || currentUser;
@@ -101,6 +102,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
         if (!socket) return;
 
         const handleSent = (data) => {
+            if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
             setChallengStatus('sent');
             setChallengeFeedback(`Challenge sent to ${data.target_username}!`);
             setTimeout(() => {
@@ -110,6 +112,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
         };
 
         const handleError = (data) => {
+            if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
             setChallengStatus('error');
             setChallengeFeedback(data.message || 'Failed to send challenge.');
         };
@@ -185,6 +188,11 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             topicTitle: selectedTopic.title,
             challengerStance: selectedStance
         });
+        // Safety timeout: reset spinner if no response in 10s
+        challengeTimeoutRef.current = setTimeout(() => {
+            setChallengStatus('error');
+            setChallengeFeedback('Challenge timed out. Please try again.');
+        }, 10000);
     };
 
     const filteredTopics = topics.filter(t =>

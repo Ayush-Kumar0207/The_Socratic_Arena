@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Swords, Check, X, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Bell, Swords, Check, X, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronRight, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const NotificationBell = ({ socket, user }) => {
@@ -12,7 +12,8 @@ const NotificationBell = ({ socket, user }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [respondingIds, setRespondingIds] = useState(new Set());
-  const [handledChallenges, setHandledChallenges] = useState(new Set());
+  const [respondedActions, setRespondedActions] = useState(new Map()); // challengeId -> 'accept' | 'decline'
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const panelRef = useRef(null);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -33,12 +34,10 @@ const NotificationBell = ({ socket, user }) => {
 
     // Real-time: new challenge received
     const handleChallengeReceived = (data) => {
-      // Refresh list
       socket.emit('fetch_notifications');
-      // Show toast
       setToast({
         type: 'challenge_invite',
-        message: `${data.challenger_name || 'Someone'} challenged you to "${data.topic_title}"!`,
+        message: `⚔️ ${data.challenger_name || 'Someone'} challenged you to "${data.topic_title}"!`,
         challenge_id: data.challenge_id
       });
       setTimeout(() => setToast(null), 6000);
@@ -52,9 +51,10 @@ const NotificationBell = ({ socket, user }) => {
         type: 'challenge_accepted',
         message: `Challenge accepted! Heading to lobby for "${data.topic_title}"...`
       });
-      // Auto-navigate to lobby
+      // Auto-navigate to lobby with arenaCode in state (Fix #6)
       setTimeout(() => {
         setToast(null);
+        setIsOpen(false);
         navigate(`/lobby/${data.topic_id}`, {
           state: {
             topic: { id: data.topic_id, title: data.topic_title },
@@ -67,13 +67,13 @@ const NotificationBell = ({ socket, user }) => {
     const handleChallengeDeclined = (data) => {
       socket.emit('fetch_notifications');
       setRespondingIds(new Set());
-      const senderName = data.declined_by || 'User';
-      const isSelf = senderName === 'You';
+      const declinedBy = data.declined_by || 'User';
+      const isSelf = declinedBy === 'You';
       setToast({
         type: 'challenge_declined',
         message: isSelf 
           ? `You declined the challenge for "${data.topic_title}".`
-          : `${senderName} declined your challenge for "${data.topic_title}".`
+          : `${declinedBy} declined your challenge for "${data.topic_title}".`
       });
       setTimeout(() => setToast(null), 5000);
     };
@@ -136,6 +136,7 @@ const NotificationBell = ({ socket, user }) => {
     const handleClickOutside = (e) => {
       if (panelRef.current && !panelRef.current.contains(e.target)) {
         setIsOpen(false);
+        setShowClearConfirm(false);
       }
     };
     if (isOpen) document.addEventListener('mousedown', handleClickOutside);
@@ -145,16 +146,30 @@ const NotificationBell = ({ socket, user }) => {
   const handleRespond = (challengeId, action) => {
     if (!socket || respondingIds.has(challengeId)) return;
     setRespondingIds(prev => new Set(prev).add(challengeId));
-    setHandledChallenges(prev => new Set(prev).add(challengeId)); // Disable buttons locally forever
+    setRespondedActions(prev => new Map(prev).set(challengeId, action));
     socket.emit('respond_challenge', { challengeId, action });
     
-    // Immediately close the notification panel for a cleaner UX
+    // Close the notification panel for cleaner UX
     setIsOpen(false);
   };
 
   const handleMarkAllRead = () => {
     if (!socket) return;
     socket.emit('mark_notifications_read', { notificationIds: [] });
+  };
+
+  const handleClearAll = () => {
+    if (!socket) return;
+    socket.emit('clear_notifications', { notificationIds: [] });
+    setShowClearConfirm(false);
+    setNotifications([]);
+  };
+
+  const handleClearOne = (notifId) => {
+    if (!socket) return;
+    socket.emit('clear_notifications', { notificationIds: [notifId] });
+    // Optimistic removal
+    setNotifications(prev => prev.filter(n => n.id !== notifId));
   };
 
   const getTimeAgo = (dateStr) => {
@@ -230,6 +245,7 @@ const NotificationBell = ({ socket, user }) => {
         <button
           onClick={() => {
             setIsOpen(!isOpen);
+            setShowClearConfirm(false);
             if (!isOpen && socket) socket.emit('fetch_notifications');
           }}
           className="relative p-2 text-slate-400 hover:text-slate-100 transition-colors bg-slate-800/50 hover:bg-slate-700/50 rounded-lg border border-slate-700"
@@ -251,15 +267,47 @@ const NotificationBell = ({ socket, user }) => {
               <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
                 <Bell className="h-4 w-4 text-cyan-400" /> Notifications
               </h3>
-              {unreadCount > 0 && (
-                <button
-                  onClick={handleMarkAllRead}
-                  className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 hover:text-cyan-300 transition px-2 py-1 hover:bg-cyan-500/10 rounded-md"
-                >
-                  Mark all read
-                </button>
-              )}
+              <div className="flex items-center gap-1">
+                {unreadCount > 0 && (
+                  <button
+                    onClick={handleMarkAllRead}
+                    className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 hover:text-cyan-300 transition px-2 py-1 hover:bg-cyan-500/10 rounded-md"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                {notifications.length > 0 && (
+                  <button
+                    onClick={() => setShowClearConfirm(true)}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-md transition"
+                    title="Clear all notifications"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Clear All Confirmation */}
+            {showClearConfirm && (
+              <div className="px-4 py-3 border-b border-slate-800 bg-rose-950/30 flex items-center justify-between gap-3 shrink-0">
+                <p className="text-xs text-rose-300 font-medium">Clear all notifications?</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => setShowClearConfirm(false)}
+                    className="px-3 py-1 text-[10px] font-bold text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-md transition uppercase tracking-wider"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleClearAll}
+                    className="px-3 py-1 text-[10px] font-bold text-rose-950 bg-rose-500 hover:bg-rose-400 rounded-md transition uppercase tracking-wider"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Notification List */}
             <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -273,12 +321,14 @@ const NotificationBell = ({ socket, user }) => {
                 <div className="py-1">
                   {notifications.map((notif) => {
                     const expired = isExpired(notif);
-                    const isResponding = respondingIds.has(notif.metadata?.challenge_id);
+                    const challengeId = notif.metadata?.challenge_id;
+                    const isResponding = respondingIds.has(challengeId);
+                    const respondedAction = respondedActions.get(challengeId);
 
                     return (
                       <div
                         key={notif.id}
-                        className={`px-4 py-3 border-l-2 transition-colors ${getNotifBorder(notif.type)} ${
+                        className={`group px-4 py-3 border-l-2 transition-colors ${getNotifBorder(notif.type)} ${
                           notif.is_read ? 'bg-transparent' : 'bg-slate-800/30'
                         } hover:bg-slate-800/50`}
                       >
@@ -289,17 +339,30 @@ const NotificationBell = ({ socket, user }) => {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2 mb-0.5">
                               <p className="text-xs font-bold text-slate-200 truncate">{notif.title}</p>
-                              <span className="text-[10px] text-slate-500 font-medium shrink-0">
-                                {getTimeAgo(notif.created_at)}
-                              </span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {getTimeAgo(notif.created_at)}
+                                </span>
+                                {/* Individual dismiss button */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleClearOne(notif.id);
+                                  }}
+                                  className="p-0.5 text-slate-600 hover:text-rose-400 rounded opacity-0 group-hover:opacity-100 transition-all"
+                                  title="Remove notification"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
                             </div>
                             <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{notif.message}</p>
 
                             {/* Inline Accept/Decline for challenge invites */}
-                            {notif.type === 'challenge_invite' && !expired && !handledChallenges.has(notif.metadata?.challenge_id) && (
+                            {notif.type === 'challenge_invite' && !expired && !respondedAction && (
                               <div className="flex items-center gap-2 mt-2.5">
                                 <button
-                                  onClick={() => handleRespond(notif.metadata.challenge_id, 'accept')}
+                                  onClick={() => handleRespond(challengeId, 'accept')}
                                   disabled={isResponding}
                                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 font-bold text-[11px] rounded-lg border border-emerald-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
@@ -311,13 +374,28 @@ const NotificationBell = ({ socket, user }) => {
                                   Accept
                                 </button>
                                 <button
-                                  onClick={() => handleRespond(notif.metadata.challenge_id, 'decline')}
+                                  onClick={() => handleRespond(challengeId, 'decline')}
                                   disabled={isResponding}
                                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-lg border border-slate-600/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   <X className="h-3 w-3" />
                                   Decline
                                 </button>
+                              </div>
+                            )}
+
+                            {/* Status text after responding (Fix #4) */}
+                            {notif.type === 'challenge_invite' && !expired && respondedAction && (
+                              <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${
+                                respondedAction === 'accept' 
+                                  ? 'text-emerald-400' 
+                                  : 'text-rose-400'
+                              }`}>
+                                {respondedAction === 'accept' ? (
+                                  <><CheckCircle2 className="h-3.5 w-3.5" /> You accepted this challenge</>
+                                ) : (
+                                  <><XCircle className="h-3.5 w-3.5" /> You declined this challenge</>
+                                )}
                               </div>
                             )}
 
@@ -328,7 +406,7 @@ const NotificationBell = ({ socket, user }) => {
                               </div>
                             )}
 
-                            {/* Navigate to lobby for accepted challenges */}
+                            {/* Navigate to lobby for accepted challenges (Fix #6 & #7: works for both users) */}
                             {notif.type === 'challenge_accepted' && notif.metadata?.arena_code && (
                               <button
                                 onClick={() => {

@@ -23,10 +23,10 @@ const OfflineToast = ({ session }) => {
     }
   }, [session]);
 
-  // 2. THE LIFECYCLE: Wait 7.5s before unmounting to ensure the 7s CSS fade finishes completely
+  // 2. THE LIFECYCLE: Wait 3.5s before unmounting to ensure the 3s CSS fade finishes completely
   useEffect(() => {
     if (isVisible) {
-      const timer = setTimeout(() => setIsVisible(false), 7500);
+      const timer = setTimeout(() => setIsVisible(false), 3500);
       return () => clearTimeout(timer);
     }
   }, [isVisible]);
