@@ -4,23 +4,34 @@ import { Zap } from 'lucide-react';
 const OfflineToast = ({ session }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [isFading, setIsFading] = useState(false);
-  const hasTriggered = useRef(false);
+  const hasTriggeredThisLife = useRef(false);
 
+  // 1. THE TRIGGER: Decide if we should show the toast
   useEffect(() => {
-    // TRIGGER: Only if there's a session AND we haven't shown it in this browser tab yet
-    const isSessionInStorage = sessionStorage.getItem('hasSeenNeuralLinkThisSession');
-
-    if (session && !isSessionInStorage && !hasTriggered.current) {
-      hasTriggered.current = true;
-      sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
+    if (session?.user?.id) {
+      const alreadyShown = sessionStorage.getItem('hasSeenNeuralLinkThisSession');
       
-      setIsVisible(true);
-      setIsFading(false);
+      if (!alreadyShown && !hasTriggeredThisLife.current) {
+        hasTriggeredThisLife.current = true;
+        sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
+        setIsVisible(true);
+        setIsFading(false);
+      }
+    } else {
+      // User logged out: Reset everything
+      sessionStorage.removeItem('hasSeenNeuralLinkThisSession');
+      hasTriggeredThisLife.current = false;
+      setIsVisible(false);
+    }
+  }, [session]);
 
-      // THE MAGICAL LIFECYCLE TIMERS
+  // 2. THE LIFECYCLE: Handle the 5s timer independently
+  useEffect(() => {
+    if (isVisible) {
       const exitTimer = setTimeout(() => setIsFading(true), 4200);
       const unmountTimer = setTimeout(() => {
         setIsVisible(false);
+        setIsFading(false);
       }, 5000);
 
       return () => {
@@ -28,14 +39,7 @@ const OfflineToast = ({ session }) => {
         clearTimeout(unmountTimer);
       };
     }
-    
-    // Reset if user logs out (so it can show when they log back in)
-    if (!session) {
-      sessionStorage.removeItem('hasSeenNeuralLinkThisSession');
-      hasTriggered.current = false;
-      setIsVisible(false);
-    }
-  }, [session]);
+  }, [isVisible]);
 
   if (!isVisible) return null;
 
@@ -45,7 +49,7 @@ const OfflineToast = ({ session }) => {
         fixed top-6 left-1/2 z-[200]
         flex items-center gap-4 px-6 py-3.5 rounded-full 
         bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl
-        ring-1 ring-white/10
+        ring-1 ring-white/10 pointer-events-none
         ${isFading ? 'animate-toast-exit' : 'animate-toast-reveal'}
       `}
     >
