@@ -100,15 +100,15 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket }) => {
         <div className="fixed inset-0 top-16 z-30 bg-slate-950 flex flex-col p-6 animate-in slide-in-from-right duration-200 md:hidden overflow-y-auto pb-12">
           <div className="flex flex-col gap-2 mb-8">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-2">Navigation</p>
-            <Link to="/dashboard" className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/dashboard') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
+            <Link to="/dashboard" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/dashboard') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
               <LayoutDashboard className="h-5 w-5" />
               <span className="font-semibold text-lg">Dashboard</span>
             </Link>
-            <Link to="/explore" className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/explore') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
+            <Link to="/explore" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/explore') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
               <Compass className="h-5 w-5" />
               <span className="font-semibold text-lg">Explore</span>
             </Link>
-            <Link to="/my-arena" className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/my-arena') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
+            <Link to="/my-arena" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/my-arena') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
               <Swords className="h-5 w-5" />
               <span className="font-semibold text-lg">My Arena</span>
             </Link>

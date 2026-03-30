@@ -1422,7 +1422,32 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
         if (!isAuthorized) {
           return socket.emit('private_arena_error', { message: 'This arena is already full.' });
         }
-        // Authorized participant — proceed to join socket room
+        
+        // Redirect directly to the ongoing match
+        if (arena.match_id) {
+          const { data: match } = await supabase.from('matches')
+            .select('*').eq('id', arena.match_id).single();
+          
+          if (match && match.status === 'active') {
+            socket.join(arena.match_id);
+            socket.currentMatchId = arena.match_id;
+            
+            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
+            
+            socket.emit('match_found', {
+              roomId: arena.match_id,
+              topic: arena.topic_title,
+              criticUserId: match.critic_id,
+              defenderUserId: match.defender_id,
+              roles: { [socket.id]: myRole }
+            });
+            
+            console.log(`[Private Arena] Re-entry via join: ${userId} rejoined match ${arena.match_id} as ${myRole}`);
+            return;
+          }
+        }
+        
+        return socket.emit('private_arena_error', { message: 'This debate has already ended.' });
       }
       else {
         console.error(`[Private Arena] Unhandled status/auth for code ${code}! status: ${arena.status}, creator: ${arena.creator_id}, joiner: ${arena.joiner_id}, requesting userId: ${userId}`);
@@ -1479,8 +1504,48 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       const { data: arena, error } = await supabase.from('private_arenas')
         .select('*').eq('id', arenaId).single();
 
-      if (error || !arena || arena.status === 'started') {
-        socket.emit('private_arena_error', { message: 'Arena not found or already started.' });
+      if (error || !arena) {
+        socket.emit('private_arena_error', { message: 'Arena not found.' });
+        return;
+      }
+      
+      // --- Graceful Re-entry: Arena already started ---
+      if (arena.status === 'started') {
+        const userId = socket.verifiedUserId;
+        const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
+        
+        if (!isAuthorized) {
+          socket.emit('private_arena_error', { message: 'This arena is already in progress.' });
+          return;
+        }
+        
+        // User is a participant — redirect to the existing match
+        if (arena.match_id) {
+          const { data: match } = await supabase.from('matches')
+            .select('*').eq('id', arena.match_id).single();
+          
+          if (match && match.status === 'active') {
+            // Re-join the match room
+            socket.join(arena.match_id);
+            socket.currentMatchId = arena.match_id;
+            
+            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
+            
+            socket.emit('match_found', {
+              roomId: arena.match_id,
+              topic: arena.topic_title,
+              criticUserId: match.critic_id,
+              defenderUserId: match.defender_id,
+              roles: { [socket.id]: myRole }
+            });
+            
+            console.log(`[Private Arena] Re-entry: ${userId} rejoined match ${arena.match_id} as ${myRole}`);
+            return;
+          }
+        }
+        
+        // Match not found or completed — inform user gracefully
+        socket.emit('private_arena_error', { message: 'This debate has already ended.' });
         return;
       }
       if (!arena.joiner_id) {
