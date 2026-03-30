@@ -1177,6 +1177,7 @@ const Explore = ({ socket, user }) => {
         }} 
         viewUser={selectedProfile}
         currentUserId={user?.id}
+        socket={socket}
       />
     </div>
   );

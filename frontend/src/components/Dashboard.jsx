@@ -6,7 +6,7 @@ import { getTopicDomain } from '../lib/domainUtils';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import ProfileModal from './ProfileModal';
 
-const Dashboard = ({ user }) => {
+const Dashboard = ({ user, socket }) => {
   const navigate = useNavigate();
   const [recentMatches, setRecentMatches] = useState(() => {
     try { return JSON.parse(localStorage.getItem('dashboard_matches')) || []; } catch { return []; }
@@ -380,6 +380,7 @@ const Dashboard = ({ user }) => {
         viewUser={selectedProfile}
         currentUser={selectedProfile ? null : user}
         currentUserId={user?.id}
+        socket={socket}
       />
     </div>
   );

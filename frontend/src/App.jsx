@@ -71,7 +71,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
       {/* Render persistent Navbar only for authenticated users */}
-      {session && <Navbar user={session.user} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} />}
+      {session && <Navbar user={session.user} socket={socket} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} />}
 
       {/* GLOBAL CREATE ARENA DIALOG */}
       {showCreateDialog && <CreateArenaDialog
@@ -109,7 +109,7 @@ const App = () => {
         {/* Authenticated Routes */}
         <Route
           path="/dashboard"
-          element={session ? <Dashboard user={session.user} /> : <Navigate to="/" replace />}
+          element={session ? <Dashboard user={session.user} socket={socket} /> : <Navigate to="/" replace />}
         />
         <Route
           path="/explore"

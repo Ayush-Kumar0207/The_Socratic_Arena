@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X } from 'lucide-react';
+import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, Bell } from 'lucide-react';
 import ProfileModal from './ProfileModal';
+import NotificationBell from './NotificationBell';
 
-const Navbar = ({ user, onCreateArena, onJoinArena }) => {
+const Navbar = ({ user, onCreateArena, onJoinArena, socket }) => {
   const location = useLocation();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -68,6 +69,9 @@ const Navbar = ({ user, onCreateArena, onJoinArena }) => {
               </button>
             </div>
 
+            {/* Notification Bell */}
+            {user && <NotificationBell socket={socket} user={user} />}
+
             {/* Desktop Account Button */}
             <button
               onClick={() => setIsProfileOpen(true)}
@@ -126,6 +130,14 @@ const Navbar = ({ user, onCreateArena, onJoinArena }) => {
               <Link2 className="h-5 w-5 text-emerald-400" />
               <span className="font-semibold text-lg">Join Arena</span>
             </button>
+            <button 
+              onClick={() => { setIsMenuOpen(false); }}
+              className="flex items-center gap-3 p-3 rounded-xl text-slate-300 active:bg-slate-800 text-left"
+            >
+              <Bell className="h-5 w-5 text-amber-400" />
+              <span className="font-semibold text-lg">Notifications</span>
+              {/* Mobile users use the bell in the top bar */}
+            </button>
           </div>
 
           <div className="mt-8 border-t border-slate-800 pt-6">
@@ -153,6 +165,7 @@ const Navbar = ({ user, onCreateArena, onJoinArena }) => {
         onClose={() => setIsProfileOpen(false)} 
         viewUser={user} 
         currentUserId={user?.id}
+        socket={socket}
       />
     </>
   );

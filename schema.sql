@@ -133,7 +133,10 @@ create table public.challenges (
   expires_at timestamp with time zone not null,
   created_at timestamp with time zone null default now(),
   constraint challenges_pkey primary key (id),
-  constraint challenges_arena_code_key unique (arena_code)
+  constraint challenges_arena_code_key unique (arena_code),
+  constraint challenges_challenger_id_fkey foreign KEY (challenger_id) references profiles (id) on delete CASCADE,
+  constraint challenges_challenged_id_fkey foreign KEY (challenged_id) references profiles (id) on delete CASCADE,
+  constraint challenges_topic_id_fkey foreign KEY (topic_id) references topics (id) on delete set null
 ) TABLESPACE pg_default;
 
 create index IF not exists idx_challenges_challenger on public.challenges using btree (challenger_id) TABLESPACE pg_default;
@@ -169,7 +172,8 @@ create table public.notifications (
   metadata jsonb null default '{}'::jsonb,
   is_read boolean null default false,
   created_at timestamp with time zone null default now(),
-  constraint notifications_pkey primary key (id)
+  constraint notifications_pkey primary key (id),
+  constraint notifications_user_id_fkey foreign KEY (user_id) references profiles (id) on delete CASCADE
 ) TABLESPACE pg_default;
 
 create index IF not exists idx_notifications_user on public.notifications using btree (user_id, is_read, created_at desc) TABLESPACE pg_default;

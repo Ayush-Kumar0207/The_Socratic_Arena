@@ -337,6 +337,38 @@ setInterval(async () => {
   } catch (err) {
     console.error('[Cron] Error scanning for expired matches:', err);
   }
+
+  // --- Challenge Expiry Cron ---
+  try {
+    const { data: expiredChallenges, error: chalErr } = await supabase
+      .from('challenges')
+      .update({ status: 'expired' })
+      .eq('status', 'pending')
+      .lt('expires_at', new Date().toISOString())
+      .select('id, challenger_id, challenged_id, topic_title');
+
+    if (!chalErr && expiredChallenges && expiredChallenges.length > 0) {
+      console.log(`[Cron] Expired ${expiredChallenges.length} stale challenge(s).`);
+      for (const ch of expiredChallenges) {
+        // Notify both users about expiry
+        const expiryNotifs = [
+          { user_id: ch.challenger_id, type: 'challenge_expired', title: 'Challenge Expired', message: `Your challenge for "${ch.topic_title}" was not responded to in time.`, metadata: { challenge_id: ch.id } },
+          { user_id: ch.challenged_id, type: 'challenge_expired', title: 'Challenge Expired', message: `A challenge for "${ch.topic_title}" has expired.`, metadata: { challenge_id: ch.id } }
+        ];
+        await supabase.from('notifications').insert(expiryNotifs);
+
+        // Real-time push to online users
+        [ch.challenger_id, ch.challenged_id].forEach(uid => {
+          const sockets = userSocketMap.get(uid);
+          if (sockets) {
+            sockets.forEach(sid => io.to(sid).emit('notification_new', { type: 'challenge_expired', challenge_id: ch.id }));
+          }
+        });
+      }
+    }
+  } catch (cronErr) {
+    console.error('[Cron] Error expiring challenges:', cronErr);
+  }
 }, 60 * 1000);
 
 /**
@@ -460,6 +492,14 @@ const io = new SocketIOServer(httpServer, {
 app.set('io', io);
 const cancelledDebates = new Set();
 app.set('cancelledDebates', cancelledDebates);
+
+/**
+ * User-Socket Map for Targeted Real-Time Delivery
+ * ---------------------------------------------------------------------------
+ * Maps userId -> Set<socketId> so we can emit events to specific users
+ * regardless of which socket they're connected on.
+ */
+const userSocketMap = new Map();
 
 /**
  * Multiplayer Matchmaking State
@@ -796,6 +836,16 @@ io.use(async (socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`[socket] Client connected: ${socket.id}`);
+
+  // --- Register in userSocketMap ---
+  const connectedUserId = socket.verifiedUserId;
+  if (connectedUserId) {
+    if (!userSocketMap.has(connectedUserId)) {
+      userSocketMap.set(connectedUserId, new Set());
+    }
+    userSocketMap.get(connectedUserId).add(socket.id);
+    console.log(`[userSocketMap] Registered ${socket.id} for user ${connectedUserId} (${userSocketMap.get(connectedUserId).size} active)`);
+  }
 
   // Ready event for connection verification
   socket.emit('server:ready', {
@@ -1631,8 +1681,339 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
   /**
    * Handle disconnection
    */
+  // =========================================================================
+  // CHALLENGE & NOTIFICATION SYSTEM
+  // =========================================================================
+
+  /**
+   * Helper: Emit to all sockets belonging to a specific user
+   */
+  function emitToUser(targetUserId, event, data) {
+    const sockets = userSocketMap.get(targetUserId);
+    if (sockets && sockets.size > 0) {
+      sockets.forEach(sid => io.to(sid).emit(event, data));
+      return true; // User is online
+    }
+    return false; // User is offline
+  }
+
+  /**
+   * send_challenge — Challenger invites another user to a debate
+   */
+  socket.on('send_challenge', async ({ targetUserId, topicId, topicTitle, challengerStance }) => {
+    const challengerId = socket.verifiedUserId;
+    try {
+      // --- Validations ---
+      if (!targetUserId || !topicId || !topicTitle) {
+        return socket.emit('challenge_error', { message: 'Missing required fields.' });
+      }
+      if (challengerId === targetUserId) {
+        return socket.emit('challenge_error', { message: 'You cannot challenge yourself.' });
+      }
+
+      // Check target user exists
+      const { data: targetProfile, error: profileErr } = await supabase
+        .from('profiles').select('id, username').eq('id', targetUserId).single();
+      if (profileErr || !targetProfile) {
+        return socket.emit('challenge_error', { message: 'Target user not found.' });
+      }
+
+      // Check for duplicate pending challenge to the same user
+      const { data: existing } = await supabase
+        .from('challenges')
+        .select('id')
+        .eq('challenger_id', challengerId)
+        .eq('challenged_id', targetUserId)
+        .eq('status', 'pending')
+        .maybeSingle();
+      if (existing) {
+        return socket.emit('challenge_error', { message: 'You already have a pending challenge to this user.' });
+      }
+
+      // --- Generate arena code ---
+      const prefix = (challengerId || '').replace(/-/g, '').substring(0, 4).toUpperCase();
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let suffix = '';
+      for (let i = 0; i < 4; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+      const arenaCode = `${prefix}-${suffix}`;
+
+      // --- Insert challenge row ---
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
+      const { data: challenge, error: insertErr } = await supabase
+        .from('challenges')
+        .insert({
+          challenger_id: challengerId,
+          challenged_id: targetUserId,
+          topic_id: topicId,
+          topic_title: topicTitle,
+          arena_code: arenaCode,
+          status: 'pending',
+          challenger_stance: challengerStance || 'Random',
+          expires_at: expiresAt
+        })
+        .select()
+        .single();
+
+      if (insertErr) {
+        console.error('[Challenge] Insert error:', insertErr);
+        return socket.emit('challenge_error', { message: 'Failed to create challenge. Please try again.' });
+      }
+
+      // --- Get challenger's username for the notification ---
+      const { data: challengerProfile } = await supabase
+        .from('profiles').select('username').eq('id', challengerId).single();
+      const challengerName = challengerProfile?.username || 'A debater';
+
+      // --- Insert notification for challenged user ---
+      const { error: notifErr } = await supabase.from('notifications').insert({
+        user_id: targetUserId,
+        type: 'challenge_invite',
+        title: 'Challenge Received!',
+        message: `${challengerName} challenged you to debate: "${topicTitle}"`,
+        metadata: {
+          challenge_id: challenge.id,
+          challenger_id: challengerId,
+          challenger_name: challengerName,
+          topic_id: topicId,
+          topic_title: topicTitle,
+          arena_code: arenaCode,
+          challenger_stance: challengerStance || 'Random',
+          expires_at: expiresAt
+        }
+      });
+      if (notifErr) console.error('[Challenge] Notification insert error:', notifErr);
+
+      // --- Real-time delivery ---
+      emitToUser(targetUserId, 'challenge_received', {
+        challenge_id: challenge.id,
+        challenger_id: challengerId,
+        challenger_name: challengerName,
+        topic_id: topicId,
+        topic_title: topicTitle,
+        arena_code: arenaCode,
+        challenger_stance: challengerStance || 'Random',
+        expires_at: expiresAt
+      });
+
+      socket.emit('challenge_sent', {
+        challenge_id: challenge.id,
+        target_username: targetProfile.username || 'User',
+        topic_title: topicTitle
+      });
+
+      console.log(`[Challenge] ${challengerName} (${challengerId}) challenged ${targetProfile.username} (${targetUserId}) to "${topicTitle}" | Code: ${arenaCode} | Expires: ${expiresAt}`);
+    } catch (err) {
+      console.error('[Challenge] send_challenge error:', err);
+      socket.emit('challenge_error', { message: 'An unexpected error occurred.' });
+    }
+  });
+
+  /**
+   * respond_challenge — Accept or decline a challenge
+   * CRITICAL: On accept, verify challenger is still online before creating arena
+   */
+  socket.on('respond_challenge', async ({ challengeId, action }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      if (!challengeId || !['accept', 'decline'].includes(action)) {
+        return socket.emit('challenge_error', { message: 'Invalid challenge response.' });
+      }
+
+      // --- Fetch and validate challenge ---
+      const { data: challenge, error: fetchErr } = await supabase
+        .from('challenges')
+        .select('*')
+        .eq('id', challengeId)
+        .single();
+
+      if (fetchErr || !challenge) {
+        return socket.emit('challenge_error', { message: 'Challenge not found.' });
+      }
+      if (challenge.challenged_id !== userId) {
+        return socket.emit('challenge_error', { message: 'This challenge is not for you.' });
+      }
+      if (challenge.status !== 'pending') {
+        return socket.emit('challenge_error', { message: `Challenge is already ${challenge.status}.` });
+      }
+      if (new Date(challenge.expires_at) < new Date()) {
+        // Auto-expire it
+        await supabase.from('challenges').update({ status: 'expired' }).eq('id', challengeId);
+        return socket.emit('challenge_error', { message: 'This challenge has expired.' });
+      }
+
+      // --- Get usernames for notifications ---
+      const { data: profiles } = await supabase
+        .from('profiles').select('id, username').in('id', [challenge.challenger_id, challenge.challenged_id]);
+      const challengerProfile = profiles?.find(p => p.id === challenge.challenger_id);
+      const challengedProfile = profiles?.find(p => p.id === challenge.challenged_id);
+      const challengerName = challengerProfile?.username || 'Challenger';
+      const challengedName = challengedProfile?.username || 'User';
+
+      if (action === 'accept') {
+        // --- CRITICAL: Check if challenger is still online ---
+        const challengerSockets = userSocketMap.get(challenge.challenger_id);
+        const challengerOnline = challengerSockets && challengerSockets.size > 0;
+
+        if (!challengerOnline) {
+          // Abort — challenger is offline
+          await supabase.from('challenges').update({ status: 'expired' }).eq('id', challengeId);
+          return socket.emit('challenge_error', {
+            message: `${challengerName} is no longer online. Challenge cancelled.`
+          });
+        }
+
+        // --- Update challenge status ---
+        const { error: updateErr } = await supabase
+          .from('challenges').update({ status: 'accepted' }).eq('id', challengeId);
+        if (updateErr) {
+          console.error('[Challenge] Accept update error:', updateErr);
+          return socket.emit('challenge_error', { message: 'Failed to accept challenge.' });
+        }
+
+        // --- Create private arena ---
+        const { data: arena, error: arenaErr } = await supabase
+          .from('private_arenas')
+          .insert({
+            arena_code: challenge.arena_code,
+            topic_id: challenge.topic_id,
+            topic_title: challenge.topic_title,
+            creator_id: challenge.challenger_id,
+            joiner_id: userId,
+            creator_stance: challenge.challenger_stance,
+            status: 'paired'
+          })
+          .select()
+          .single();
+
+        if (arenaErr) {
+          console.error('[Challenge] Arena creation error:', arenaErr);
+          return socket.emit('challenge_error', { message: 'Failed to create arena.' });
+        }
+
+        // Link arena to challenge
+        await supabase.from('challenges').update({ match_id: arena.id }).eq('id', challengeId);
+
+        // --- Insert acceptance notification for challenger ---
+        await supabase.from('notifications').insert({
+          user_id: challenge.challenger_id,
+          type: 'challenge_accepted',
+          title: 'Challenge Accepted!',
+          message: `${challengedName} accepted your challenge for "${challenge.topic_title}"!`,
+          metadata: {
+            challenge_id: challengeId,
+            arena_code: challenge.arena_code,
+            topic_id: challenge.topic_id,
+            topic_title: challenge.topic_title,
+            arena_id: arena.id
+          }
+        });
+
+        // --- Emit to both users ---
+        const acceptPayload = {
+          challenge_id: challengeId,
+          arena_code: challenge.arena_code,
+          arena_id: arena.id,
+          topic_id: challenge.topic_id,
+          topic_title: challenge.topic_title
+        };
+
+        emitToUser(challenge.challenger_id, 'challenge_accepted', acceptPayload);
+        socket.emit('challenge_accepted', acceptPayload);
+
+        console.log(`[Challenge] ${challengedName} ACCEPTED challenge from ${challengerName} for "${challenge.topic_title}" | Arena: ${challenge.arena_code}`);
+
+      } else {
+        // --- DECLINE ---
+        const { error: updateErr } = await supabase
+          .from('challenges').update({ status: 'declined' }).eq('id', challengeId);
+        if (updateErr) {
+          console.error('[Challenge] Decline update error:', updateErr);
+          return socket.emit('challenge_error', { message: 'Failed to decline challenge.' });
+        }
+
+        // Notify challenger
+        await supabase.from('notifications').insert({
+          user_id: challenge.challenger_id,
+          type: 'challenge_declined',
+          title: 'Challenge Declined',
+          message: `${challengedName} declined your challenge for "${challenge.topic_title}".`,
+          metadata: { challenge_id: challengeId, topic_title: challenge.topic_title }
+        });
+
+        emitToUser(challenge.challenger_id, 'challenge_declined', {
+          challenge_id: challengeId,
+          declined_by: challengedName,
+          topic_title: challenge.topic_title
+        });
+
+        socket.emit('challenge_response_confirmed', { challenge_id: challengeId, action: 'declined' });
+
+        console.log(`[Challenge] ${challengedName} DECLINED challenge from ${challengerName} for "${challenge.topic_title}"`);
+      }
+    } catch (err) {
+      console.error('[Challenge] respond_challenge error:', err);
+      socket.emit('challenge_error', { message: 'An unexpected error occurred.' });
+    }
+  });
+
+  /**
+   * fetch_notifications — Fetch the user's latest notifications
+   */
+  socket.on('fetch_notifications', async () => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('[Notifications] Fetch error:', error);
+        return socket.emit('notifications_list', { notifications: [], error: 'Failed to fetch notifications.' });
+      }
+
+      socket.emit('notifications_list', { notifications: data || [] });
+    } catch (err) {
+      console.error('[Notifications] fetch_notifications error:', err);
+      socket.emit('notifications_list', { notifications: [], error: 'Server error.' });
+    }
+  });
+
+  /**
+   * mark_notifications_read — Mark specified notifications as read
+   */
+  socket.on('mark_notifications_read', async ({ notificationIds }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      if (!notificationIds || !Array.isArray(notificationIds) || notificationIds.length === 0) {
+        // Mark ALL as read
+        await supabase.from('notifications').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+      } else {
+        await supabase.from('notifications').update({ is_read: true }).in('id', notificationIds).eq('user_id', userId);
+      }
+      socket.emit('notifications_marked_read', { success: true });
+    } catch (err) {
+      console.error('[Notifications] mark_read error:', err);
+    }
+  });
+
+  /**
+   * Handle disconnection
+   */
   socket.on('disconnect', async (reason) => {
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
+
+    // --- Remove from userSocketMap ---
+    const dcUserId = socket.verifiedUserId;
+    if (dcUserId && userSocketMap.has(dcUserId)) {
+      userSocketMap.get(dcUserId).delete(socket.id);
+      if (userSocketMap.get(dcUserId).size === 0) {
+        userSocketMap.delete(dcUserId);
+      }
+      console.log(`[userSocketMap] Unregistered ${socket.id} for user ${dcUserId} (${userSocketMap.get(dcUserId)?.size || 0} remaining)`);
+    }
 
     // Remove from any topic waiting queue
     for (const [topicId, queue] of Object.entries(waitingQueues)) {
