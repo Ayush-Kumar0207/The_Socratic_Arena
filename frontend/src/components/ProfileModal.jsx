@@ -21,6 +21,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
     const [challengeFeedback, setChallengeFeedback] = useState('');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = useRef(null);
+    const challengeContainerRef = useRef(null);
 
     // Determine which user to display
     const activeUser = viewUser || currentUser;
@@ -133,7 +134,10 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
 
     useEffect(() => {
         const handleOutsideClick = (event) => {
-            if (modalRef.current && !modalRef.current.contains(event.target)) {
+            const isMainModalClick = modalRef.current && modalRef.current.contains(event.target);
+            const isChallengeDialogClick = challengeContainerRef.current && challengeContainerRef.current.contains(event.target);
+            
+            if (!isMainModalClick && !isChallengeDialogClick) {
                 onClose();
             }
         };
@@ -198,7 +202,11 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             {/* Challenge Dialog Overlay */}
             {showChallengeDialog && (
                 <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div 
+                        ref={challengeContainerRef}
+                        className="w-full max-w-sm bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden" 
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         {/* Challenge Header */}
                         <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between shrink-0">
                             <h3 className="font-bold text-slate-100 flex items-center gap-2">

@@ -49,11 +49,13 @@ const Lobby = ({ socket, user }) => {
       setArenaId(id);
       setMyRole('creator');
       myRoleRef.current = 'creator';
+      setPrivateError(null);
     };
 
     const handleArenaJoined = ({ arenaId: id, creatorId, joinerId, topicTitle }) => {
       setArenaId(id);
       setIsPaired(true);
+      setPrivateError(null);
       if (creatorId === user?.id) {
         setMyRole('creator');
         myRoleRef.current = 'creator';
@@ -111,7 +113,7 @@ const Lobby = ({ socket, user }) => {
       socket.off('private_arena_stance_update', handleStanceUpdate);
       socket.off('private_arena_error', handlePrivateError);
     };
-  }, [socket, navigate]);
+  }, [socket, navigate, incomingArenaCode, topic.id, topic.title]);
 
   // Broadcast stance changes when paired
   useEffect(() => {

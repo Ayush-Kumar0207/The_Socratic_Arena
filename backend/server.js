@@ -1359,42 +1359,93 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
     const userId = socket.verifiedUserId;
     try {
       const code = (arenaCode || '').trim().toUpperCase();
-      const { data: arena, error } = await supabase
-        .from('private_arenas')
-        .select('*')
-        .eq('arena_code', code)
-        .eq('status', 'waiting')
-        .single();
+      
+      // --- DB Propagation Retry Loop (up to 5 tries with 500ms delay) ---
+      let arena = null;
+      let error = null;
+      let attempts = 0;
+      
+      while (attempts < 5) {
+        const { data, error: fetchError } = await supabase
+          .from('private_arenas').select('*').eq('arena_code', code).maybeSingle();
+        
+        arena = data;
+        error = fetchError;
+        
+        if (arena) break; // found it
+        if (error) {
+           console.error(`[Private Arena] join fetchError on attempt ${attempts}:`, error);
+           break; // real error
+        }
+        
+        // --- Not found yet? Wait and retry ---
+        attempts++;
+        console.log(`[Private Arena] Arena ${code} not found yet, attempt ${attempts}/5... sleeping 1s`);
+        if (attempts < 5) await new Promise(r => setTimeout(r, 1000));
+      }
 
       if (error || !arena) {
-        socket.emit('private_arena_error', { message: 'Invalid or expired Arena Code.' });
-        return;
+        console.error(`[Private Arena] Failing join for ${code}. error:`, error, 'arena:', arena);
+        return socket.emit('private_arena_error', { message: 'Invalid or expired Arena Code. (Debug: Timeout loading from DB)' });
+      }
+      
+      if (['completed', 'abandoned', 'expired'].includes(arena.status)) {
+        return socket.emit('private_arena_error', { message: `Invalid or expired Arena Code. (Debug: Status is ${arena.status})` });
       }
 
-      if (arena.creator_id === userId) {
-        socket.emit('private_arena_error', { message: 'You cannot join your own arena!' });
-        return;
+      // --- Case 1: Normal Join (status is waiting, joiner is NOT creator) ---
+      if (arena.status === 'waiting' && arena.creator_id !== userId) {
+        const { error: updateError } = await supabase.from('private_arenas')
+          .update({ joiner_id: userId, status: 'paired' })
+          .eq('id', arena.id);
+        if (updateError) throw updateError;
+        
+        // Update local arena object for the pairing broadcast below
+        arena.joiner_id = userId;
+        arena.status = 'paired';
+      } 
+      // --- Case 2: Challenge/Re-entry (status is already paired) ---
+      else if (arena.status === 'paired') {
+        const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
+        if (!isAuthorized) {
+          return socket.emit('private_arena_error', { message: 'This arena is already full.' });
+        }
+        // Authorized participant — proceed to join socket room
+      }
+      // --- Case 3: Creator re-joining their own waiting arena ---
+      else if (arena.status === 'waiting' && arena.creator_id === userId) {
+        // Authorized creator — proceed to join socket room
+      }
+      // --- Case 4: Match already started (Re-entry on refresh) ---
+      else if (arena.status === 'started') {
+        const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
+        if (!isAuthorized) {
+          return socket.emit('private_arena_error', { message: 'This arena is already full.' });
+        }
+        // Authorized participant — proceed to join socket room
+      }
+      else {
+        console.error(`[Private Arena] Unhandled status/auth for code ${code}! status: ${arena.status}, creator: ${arena.creator_id}, joiner: ${arena.joiner_id}, requesting userId: ${userId}`);
+        return socket.emit('private_arena_error', { message: `Invalid or expired Arena Code. (Debug: Unhandled status ${arena.status})` });
       }
 
-      const { error: updateError } = await supabase.from('private_arenas')
-        .update({ joiner_id: userId, status: 'paired' })
-        .eq('id', arena.id);
-      if (updateError) throw updateError;
-
+      // --- Join socket room and notify pairing ---
       socket.join(`private_${arena.id}`);
       socket.privateArenaId = arena.id;
 
-      console.log(`[Private Arena] Joined: ${code} — joiner ${userId}`);
+      console.log(`[Private Arena] Client ${userId} joined room private_${arena.id} (Status: ${arena.status})`);
 
-      io.to(`private_${arena.id}`).emit('private_arena_joined', {
-        arenaId: arena.id,
-        topicTitle: arena.topic_title,
-        topicId: arena.topic_id,
-        creatorId: arena.creator_id,
-        joinerId: userId
-      });
+      if (arena.creator_id && arena.joiner_id) {
+        io.to(`private_${arena.id}`).emit('private_arena_joined', {
+          arenaId: arena.id,
+          topicTitle: arena.topic_title,
+          topicId: arena.topic_id,
+          creatorId: arena.creator_id,
+          joinerId: arena.joiner_id
+        });
+      }
     } catch (err) {
-      console.error('[Private Arena] Join error:', err);
+      console.error('[Private Arena] join_private_arena error:', err);
       socket.emit('private_arena_error', { message: 'Failed to join arena.' });
     }
   });
@@ -1908,6 +1959,25 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           }
         });
 
+        // --- Update the original challenge_invite notification to act as a receipt ---
+        const { data: userNotifs } = await supabase.from('notifications')
+          .select('id, metadata')
+          .eq('user_id', userId)
+          .eq('type', 'challenge_invite');
+          
+        if (userNotifs) {
+          const invite = userNotifs.find(n => n.metadata?.challenge_id === challengeId);
+          if (invite) {
+            await supabase.from('notifications').update({
+              type: 'challenge_accepted',
+              title: 'Challenge Accepted',
+              message: `You accepted the challenge from ${challengerName} for "${challenge.topic_title}".`,
+              is_read: true
+            }).eq('id', invite.id);
+            console.log(`[Challenge] Transformed original challenge_invite notification (ID: ${invite.id}) to receipt for user ${userId}`);
+          }
+        }
+
         // --- Emit to both users ---
         const acceptPayload = {
           challenge_id: challengeId,
@@ -1940,9 +2010,35 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           metadata: { challenge_id: challengeId, topic_title: challenge.topic_title }
         });
 
+        // --- Update the original challenge_invite notification to act as a receipt ---
+        const { data: userNotifs } = await supabase.from('notifications')
+          .select('id, metadata')
+          .eq('user_id', userId)
+          .eq('type', 'challenge_invite');
+          
+        if (userNotifs) {
+          const invite = userNotifs.find(n => n.metadata?.challenge_id === challengeId);
+          if (invite) {
+            await supabase.from('notifications').update({
+              type: 'challenge_declined',
+              title: 'Challenge Declined',
+              message: `You declined the challenge from ${challengerName} for "${challenge.topic_title}".`,
+              is_read: true
+            }).eq('id', invite.id);
+            console.log(`[Challenge] Transformed original challenge_invite notification (ID: ${invite.id}) to receipt for user ${userId}`);
+          }
+        }
+
         emitToUser(challenge.challenger_id, 'challenge_declined', {
           challenge_id: challengeId,
           declined_by: challengedName,
+          topic_title: challenge.topic_title
+        });
+        
+        // Emit to the challenged user so their UI can clear immediately
+        socket.emit('challenge_declined', {
+          challenge_id: challengeId,
+          declined_by: 'You',
           topic_title: challenge.topic_title
         });
 

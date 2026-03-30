@@ -8,6 +8,7 @@ const NotificationBell = ({ socket, user }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [respondingIds, setRespondingIds] = useState(new Set());
+  const [handledChallenges, setHandledChallenges] = useState(new Set());
   const panelRef = useRef(null);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -39,6 +40,7 @@ const NotificationBell = ({ socket, user }) => {
     // Real-time: challenge accepted — navigate to lobby
     const handleChallengeAccepted = (data) => {
       socket.emit('fetch_notifications');
+      setRespondingIds(new Set());
       setToast({
         type: 'challenge_accepted',
         message: `Challenge accepted! Heading to lobby for "${data.topic_title}"...`
@@ -57,9 +59,14 @@ const NotificationBell = ({ socket, user }) => {
 
     const handleChallengeDeclined = (data) => {
       socket.emit('fetch_notifications');
+      setRespondingIds(new Set());
+      const senderName = data.declined_by || 'User';
+      const isSelf = senderName === 'You';
       setToast({
         type: 'challenge_declined',
-        message: `${data.declined_by || 'User'} declined your challenge for "${data.topic_title}".`
+        message: isSelf 
+          ? `You declined the challenge for "${data.topic_title}".`
+          : `${senderName} declined your challenge for "${data.topic_title}".`
       });
       setTimeout(() => setToast(null), 5000);
     };
@@ -131,7 +138,11 @@ const NotificationBell = ({ socket, user }) => {
   const handleRespond = (challengeId, action) => {
     if (!socket || respondingIds.has(challengeId)) return;
     setRespondingIds(prev => new Set(prev).add(challengeId));
+    setHandledChallenges(prev => new Set(prev).add(challengeId)); // Disable buttons locally forever
     socket.emit('respond_challenge', { challengeId, action });
+    
+    // Immediately close the notification panel for a cleaner UX
+    setIsOpen(false);
   };
 
   const handleMarkAllRead = () => {
@@ -278,7 +289,7 @@ const NotificationBell = ({ socket, user }) => {
                             <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{notif.message}</p>
 
                             {/* Inline Accept/Decline for challenge invites */}
-                            {notif.type === 'challenge_invite' && !expired && (
+                            {notif.type === 'challenge_invite' && !expired && !handledChallenges.has(notif.metadata?.challenge_id) && (
                               <div className="flex items-center gap-2 mt-2.5">
                                 <button
                                   onClick={() => handleRespond(notif.metadata.challenge_id, 'accept')}
