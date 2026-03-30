@@ -15,6 +15,33 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Network Safety Net (Firewall Detection) -->
+    <script>
+      (function() {
+        window.__APP_LOAD_TIMEOUT__ = setTimeout(function() {
+          if (!window.__SOCRATIC_ARENA_INITIALIZED__) {
+            var root = document.getElementById('root');
+            if (root && root.innerHTML === '') {
+              root.innerHTML = `
+                <div style="display:flex;min-height:100vh;width:100%;flex-direction:column;align-items:center;justify-content:center;background-color:#020617;color:#94a3b8;font-family:sans-serif;padding:2rem;text-align:center;">
+                  <div style="background-color:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:1rem;padding:2rem;max-width:28rem;">
+                    <div style="color:#ef4444;font-size:3rem;margin-bottom:1rem;">⚠️</div>
+                    <h2 style="color:#f1f5f9;font-size:1.5rem;font-weight:bold;margin-bottom:0.5rem;">Regional Connectivity Issue?</h2>
+                    <p style="margin-bottom:1.5rem;font-size:0.875rem;line-height:1.5;">The Arena is taking too long to load. Your institutional firewall or LAN might be restricting some battle-critical resources.</p>
+                    <div style="display:flex;flex-direction:column;gap:0.75rem;">
+                      <button onclick="window.location.reload()" style="background-color:#06b6d4;color:#020617;border:none;border-radius:0.5rem;padding:0.75rem;font-weight:bold;cursor:pointer;transition:background-color 0.2s;">Force Reload Arena</button>
+                      <p style="font-size:0.75rem;color:#64748b;">Tip: Try using a VPN or Mobile Hotspot if this persists.</p>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+          }
+        }, 15000); // Trigger after 15s if app hasn't signaled load
+      })();
+    </script>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -15,3 +15,7 @@ createRoot(document.getElementById('root')).render(
     </ErrorBoundary>
   </StrictMode>,
 );
+
+// Signal successful initialization to the Network Safety Net in index.html
+window.__SOCRATIC_ARENA_INITIALIZED__ = true;
+if (window.__APP_LOAD_TIMEOUT__) clearTimeout(window.__APP_LOAD_TIMEOUT__);

@@ -247,7 +247,7 @@ const Lobby = ({ socket, user }) => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-amber-200">Waking up the Arena...</h3>
-                  <p className="text-[11px] text-amber-500/80 leading-tight">Backend is spinning up (Render Cold Start). Please wait 30-50 seconds.</p>
+                  <p className="text-[11px] text-amber-500/80 leading-tight">Backend is spinning up (Render Cold Start). On some LANs, this might take 30-50s.</p>
                 </div>
               </div>
             </div>
