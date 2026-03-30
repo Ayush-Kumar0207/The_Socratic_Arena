@@ -114,10 +114,10 @@ button.keep-cursor:disabled {
 
 /* ── Master Magical Toast Animation (7s Total Ghostly Fade) ── */
 @keyframes toastFullLifecycle {
-  0% { transform: translate(-50%, -120%) scale(0.9); opacity: 0; filter: blur(8px); }
-  15% { transform: translate(-50%, 0) scale(1); opacity: 1; filter: blur(0); }
-  35% { transform: translate(-50%, 0) scale(1); opacity: 1; filter: blur(0); }
-  100% { transform: translate(-50%, -3rem) scale(0.85); opacity: 0; filter: blur(16px); }
+  0% { transform: translateY(-120%) scale(0.9); opacity: 0; filter: blur(8px); }
+  15% { transform: translateY(0) scale(1); opacity: 1; filter: blur(0); }
+  35% { transform: translateY(0) scale(1); opacity: 1; filter: blur(0); }
+  100% { transform: translateY(-3rem) scale(0.85); opacity: 0; filter: blur(16px); }
 }
 
 @keyframes shimmerFade {
@@ -126,7 +126,6 @@ button.keep-cursor:disabled {
 }
 
 .animate-magical-toast { 
-  transform: translateX(-50%);
   animation: toastFullLifecycle 7s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
 }
 
