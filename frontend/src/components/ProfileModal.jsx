@@ -244,7 +244,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
                                     </button>
 
                                     {isDropdownOpen && (
-                                        <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.7)] z-10 max-h-[320px] sm:max-h-[480px] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200 ring-1 ring-white/5">
+                                        <div className="relative mt-3 bg-slate-950/40 backdrop-blur-xl border-2 border-cyan-500/30 rounded-2xl shadow-inner z-10 max-h-[350px] sm:max-h-[500px] overflow-hidden flex flex-col animate-in slide-in-from-top-2 duration-300">
                                             {/* Search inside dropdown */}
                                             <div className="p-3 border-b border-slate-800/80 shrink-0 bg-slate-950/50">
                                                 <div className="relative group">
