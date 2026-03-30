@@ -3,7 +3,6 @@ import { Zap } from 'lucide-react';
 
 const OfflineToast = ({ session }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const [isFading, setIsFading] = useState(false);
   const hasTriggeredThisLife = useRef(false);
 
   // 1. THE TRIGGER: Decide if we should show the toast
@@ -15,7 +14,6 @@ const OfflineToast = ({ session }) => {
         hasTriggeredThisLife.current = true;
         sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
         setIsVisible(true);
-        setIsFading(false);
       }
     } else {
       // User logged out: Reset everything
@@ -25,19 +23,11 @@ const OfflineToast = ({ session }) => {
     }
   }, [session]);
 
-  // 2. THE LIFECYCLE: Handle the 5s timer independently
+  // 2. THE LIFECYCLE: Standard 5s unmount
   useEffect(() => {
     if (isVisible) {
-      const exitTimer = setTimeout(() => setIsFading(true), 4200);
-      const unmountTimer = setTimeout(() => {
-        setIsVisible(false);
-        setIsFading(false);
-      }, 5000);
-
-      return () => {
-        clearTimeout(exitTimer);
-        clearTimeout(unmountTimer);
-      };
+      const timer = setTimeout(() => setIsVisible(false), 5000);
+      return () => clearTimeout(timer);
     }
   }, [isVisible]);
 
@@ -45,13 +35,7 @@ const OfflineToast = ({ session }) => {
 
   return (
     <div 
-      className={`
-        fixed top-6 left-1/2 z-[200]
-        flex items-center gap-4 px-6 py-3.5 rounded-full 
-        bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl
-        ring-1 ring-white/10 pointer-events-none
-        ${isFading ? 'animate-toast-exit' : 'animate-toast-reveal'}
-      `}
+      className="fixed top-6 left-1/2 z-[200] flex items-center gap-4 px-6 py-3.5 rounded-full bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl ring-1 ring-white/10 pointer-events-none animate-magical-toast"
     >
       <div className="relative">
         <div className="absolute inset-0 bg-cyan-500/50 blur-lg animate-pulse rounded-full"></div>
