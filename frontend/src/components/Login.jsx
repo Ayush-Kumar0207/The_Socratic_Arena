@@ -58,7 +58,7 @@ const Login = () => {
         if (error) throw error;
       }
 
-      navigate('/arena');
+      navigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Authentication failed');
     } finally {

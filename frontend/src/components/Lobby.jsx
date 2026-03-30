@@ -20,6 +20,7 @@ const Lobby = ({ socket, user }) => {
   const [opponentStance, setOpponentStance] = useState(null);
   const [copied, setCopied] = useState(false);
   const [privateError, setPrivateError] = useState(null);
+  const [isSocketConnected, setIsSocketConnected] = useState(socket?.connected || false);
 
   // Check if we arrived via "Join Arena" with an arenaCode in route state
   const incomingArenaCode = location.state?.arenaCode;
@@ -81,6 +82,30 @@ const Lobby = ({ socket, user }) => {
       setTimeout(() => setPrivateError(null), 4000);
     };
 
+    const handleStatusChange = () => {
+      setIsSocketConnected(socket.connected);
+      // If we just connected and don't have an arena code yet, try again
+      if (socket.connected) {
+        if (!incomingArenaCode) {
+          socket.emit('create_private_arena', {
+            userId: user?.id,
+            topicId: topic.id,
+            topicTitle: topic.title
+          });
+        } else {
+          setMyRole('joiner');
+          myRoleRef.current = 'joiner';
+          socket.emit('join_private_arena', {
+            userId: user?.id,
+            arenaCode: incomingArenaCode
+          });
+        }
+      }
+    };
+
+    socket.on('connect', handleStatusChange);
+    socket.on('disconnect', handleStatusChange);
+
     socket.on('match_found', handleMatchFound);
     socket.on('waiting_for_opponent', handleWaiting);
     socket.on('private_arena_created', handleArenaCreated);
@@ -88,24 +113,17 @@ const Lobby = ({ socket, user }) => {
     socket.on('private_arena_stance_update', handleStanceUpdate);
     socket.on('private_arena_error', handlePrivateError);
 
-    // Auto-create private arena on mount (unless we're joining one)
-    if (!incomingArenaCode) {
-      socket.emit('create_private_arena', {
-        userId: user?.id,
-        topicId: topic.id,
-        topicTitle: topic.title
-      });
+    // Initial attempt if connected
+    if (socket.connected) {
+      handleStatusChange();
     } else {
-      // We're joining via code — emit join
-      setMyRole('joiner');
-      myRoleRef.current = 'joiner';
-      socket.emit('join_private_arena', {
-        userId: user?.id,
-        arenaCode: incomingArenaCode
-      });
+      // If not connected, it might be Render cold start — wait for 'connect' event
+      console.log("[Lobby] Socket not connected, waiting for backend to wake up...");
     }
 
     return () => {
+      socket.off('connect', handleStatusChange);
+      socket.off('disconnect', handleStatusChange);
       socket.off('match_found', handleMatchFound);
       socket.off('waiting_for_opponent', handleWaiting);
       socket.off('private_arena_created', handleArenaCreated);
@@ -219,6 +237,21 @@ const Lobby = ({ socket, user }) => {
               You are about to enter the ring. Choose your combat stance carefully.
             </p>
           </header>
+
+          {/* Connection Status Banner (for Cold Starts) */}
+          {!isSocketConnected && (
+            <div className="w-full max-w-md mb-6 animate-pulse">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-4">
+                <div className="shrink-0 bg-amber-500/20 rounded-full p-2">
+                  <Clock className="h-5 w-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-amber-200">Waking up the Arena...</h3>
+                  <p className="text-[11px] text-amber-500/80 leading-tight">Backend is spinning up (Render Cold Start). Please wait 30-50 seconds.</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Arena Code Badge */}
           {arenaCode && !isPaired && (

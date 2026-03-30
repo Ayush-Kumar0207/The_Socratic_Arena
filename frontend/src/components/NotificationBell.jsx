@@ -4,7 +4,11 @@ import { useNavigate } from 'react-router-dom';
 
 const NotificationBell = ({ socket, user }) => {
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`notifs_${user?.id}`)) || [];
+    } catch { return []; }
+  });
   const [isOpen, setIsOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [respondingIds, setRespondingIds] = useState(new Set());
@@ -21,7 +25,10 @@ const NotificationBell = ({ socket, user }) => {
     socket.emit('fetch_notifications');
 
     const handleList = ({ notifications: notifs }) => {
-      if (notifs) setNotifications(notifs);
+      if (notifs) {
+        setNotifications(notifs);
+        localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(notifs));
+      }
     };
 
     // Real-time: new challenge received

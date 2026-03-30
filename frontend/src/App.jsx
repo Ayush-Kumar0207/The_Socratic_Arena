@@ -1,23 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { supabase } from './lib/supabaseClient';
 
-// Core layout & pages
+// Core layout & critical pages (Keep static for instant first paint)
 import Navbar from './components/Navbar';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
-import Explore from './components/Explore';
-import MyArena from './components/MyArena';
-import Lobby from './components/Lobby';
-import DebateArena from './components/DebateArena';
-import MatchReview from './components/MatchReview';
-import TopicMatches from './components/TopicMatches';
+import ErrorBoundary from './components/ErrorBoundary';
+import ReloadPrompt from './components/ReloadPrompt';
+
+// Heavy sub-pages (Lazy load to reduce initial bundle size)
+const Explore = lazy(() => import('./components/Explore'));
+const MyArena = lazy(() => import('./components/MyArena'));
+const Lobby = lazy(() => import('./components/Lobby'));
+const DebateArena = lazy(() => import('./components/DebateArena'));
+const MatchReview = lazy(() => import('./components/MatchReview'));
+const TopicMatches = lazy(() => import('./components/TopicMatches'));
 
 // Singleton Socket (Auto-connect disabled until token is ready)
 const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000', {
-  transports: ['websocket', 'polling'],
+  transports: ['polling', 'websocket'], // Prioritize polling for compatibility with institutional LANs
   autoConnect: false,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 2000,
 });
 
 const App = () => {
@@ -36,20 +42,42 @@ const App = () => {
   const [joinFeedback, setJoinFeedback] = useState('');
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setIsAuthLoading(false);
-      if (session) {
-        socket.auth = { token: session.access_token };
-        socket.connect();
+    // Auth Resilience: Retry logic for initial session fetch with Exponential Backoff
+    const fetchSession = async (retryCount = 0) => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+        setIsAuthLoading(false);
+        if (session) {
+          socket.auth = { token: session.access_token };
+          socket.connect();
+        }
+      } catch (err) {
+        if (retryCount < 3) {
+          const backoff = Math.pow(2, retryCount) * 500; // 500ms, 1000ms, 2000ms
+          console.warn(`[Auth] Session fetch failed, retrying in ${backoff}ms...`);
+          setTimeout(() => fetchSession(retryCount + 1), backoff);
+        } else {
+          setIsAuthLoading(false);
+          console.error('[Auth] Failed to fetch session after retries:', err);
+        }
       }
-    });
+    };
+
+    fetchSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        socket.auth = { token: session.access_token };
-        socket.disconnect().connect(); // refresh socket auth
+        // Only reconnect if token is different to avoid churn
+        if (socket.auth?.token !== session.access_token) {
+          socket.auth = { token: session.access_token };
+          if (socket.connected) {
+            socket.disconnect().connect();
+          } else {
+            socket.connect();
+          }
+        }
       } else {
         socket.disconnect();
       }
@@ -99,46 +127,57 @@ const App = () => {
         userId={session?.user?.id}
       />}
 
-      <Routes>
-        {/* Public / Entry Route */}
-        <Route
-          path="/"
-          element={session ? <Navigate to="/dashboard" replace /> : <Login />}
-        />
+      <Suspense fallback={
+        <div className="flex h-[calc(100vh-64px)] w-full items-center justify-center bg-slate-950">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-500"></div>
+            <div className="text-slate-400 font-medium animate-pulse">Loading Arena Module...</div>
+          </div>
+        </div>
+      }>
+        <Routes>
+          {/* Public / Entry Route */}
+          <Route
+            path="/"
+            element={session ? <Navigate to="/dashboard" replace /> : <Login />}
+          />
 
-        {/* Authenticated Routes */}
-        <Route
-          path="/dashboard"
-          element={session ? <Dashboard user={session.user} socket={socket} /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/explore"
-          element={session ? <Explore user={session.user} socket={socket} /> : <Navigate to="/" replace />}
-        />
-        <Route 
-          path="/my-arena" 
-          element={session ? <MyArena user={session.user} socket={socket} /> : <Navigate to="/" replace />} 
-        />
-        <Route
-          path="/lobby/:topicId"
-          element={session ? <Lobby user={session.user} socket={socket} /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/arena/:matchId"
-          element={session ? <DebateArena socket={socket} user={session.user} /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/review/:matchId"
-          element={session ? <MatchReview /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/topic/:topicTitle"
-          element={session ? <TopicMatches socket={socket} user={session.user} /> : <Navigate to="/" replace />}
-        />
+          {/* Authenticated Routes — Wrapped in ErrorBoundaries for Chunk Load Failure recovery */}
+          <Route
+            path="/dashboard"
+            element={session ? <Dashboard user={session.user} socket={socket} /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/explore"
+            element={session ? <ErrorBoundary><Explore user={session.user} socket={socket} /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
+          <Route 
+            path="/my-arena" 
+            element={session ? <ErrorBoundary><MyArena user={session.user} socket={socket} /></ErrorBoundary> : <Navigate to="/" replace />} 
+          />
+          <Route
+            path="/lobby/:topicId"
+            element={session ? <ErrorBoundary><Lobby user={session.user} socket={socket} /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/arena/:matchId"
+            element={session ? <ErrorBoundary><DebateArena socket={socket} user={session.user} /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/review/:matchId"
+            element={session ? <ErrorBoundary><MatchReview /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/topic/:topicTitle"
+            element={session ? <ErrorBoundary><TopicMatches socket={socket} user={session.user} /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
 
-        {/* Fallback routing */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Fallback routing */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+
+      <ReloadPrompt />
     </div>
   );
 };
