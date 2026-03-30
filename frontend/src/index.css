@@ -111,3 +111,38 @@ button.keep-cursor:disabled {
   border-color: rgba(148, 163, 184, 0.5) !important;
   box-shadow: none !important;
 }
+
+/* ── Magical PWA Toast Animations ── */
+@keyframes toastReveal {
+  0% { transform: translate(-50%, -100%) scale(0.9); opacity: 0; filter: blur(4px); }
+  100% { transform: translate(-50%, 0) scale(1); opacity: 1; filter: blur(0); }
+}
+
+@keyframes toastExit {
+  0% { transform: translate(-50%, 0) scale(1); opacity: 1; filter: blur(0); }
+  100% { transform: translate(-50%, -2rem) scale(0.8); opacity: 0; filter: blur(12px); }
+}
+
+@keyframes shimmerFade {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.animate-toast-reveal { 
+  transform: translateX(-50%);
+  animation: toastReveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
+}
+
+.animate-toast-exit { 
+  transform: translateX(-50%);
+  animation: toastExit 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
+}
+
+.text-shimmer {
+  background: linear-gradient(90deg, #94a3b8 0%, #06b6d4 25%, #f1f5f9 50%, #06b6d4 75%, #94a3b8 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerFade 4s linear infinite;
+}

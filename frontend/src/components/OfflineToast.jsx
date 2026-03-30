@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ShieldCheck } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 const OfflineToast = () => {
   const [isVisible, setIsVisible] = useState(false);
@@ -26,39 +26,42 @@ const OfflineToast = () => {
       setIsVisible(true);
       setIsFading(false);
 
-      // THE LIFECYCLE TIMERS
-      const fadeTimer = setTimeout(() => setIsFading(true), 4500);
-      const hideTimer = setTimeout(() => {
+      // THE MAGICAL LIFECYCLE TIMERS
+      // Start fade out at 4.2s to leave 800ms for the exit animation
+      const exitTimer = setTimeout(() => setIsFading(true), 4200);
+      const unmountTimer = setTimeout(() => {
         setIsVisible(false);
         setOfflineReady(false);
       }, 5000);
 
-      // CLEANUP: Prevent memory leaks if the component unmounts early
       return () => {
-        clearTimeout(fadeTimer);
-        clearTimeout(hideTimer);
+        clearTimeout(exitTimer);
+        clearTimeout(unmountTimer);
       };
     }
   }, [offlineReady, setOfflineReady]);
 
-  // STRICT CONSTRAINT: Keep the DOM clean if not in use
   if (!isVisible || !offlineReady) return null;
 
   return (
     <div 
       className={`
-        fixed top-6 left-1/2 z-[100] -translate-x-1/2
-        flex items-center gap-3 px-5 py-3 rounded-full 
-        bg-slate-900 border border-slate-700 shadow-2xl 
-        transition-all duration-500 ease-in-out
-        ${isFading ? 'opacity-0 -translate-y-4' : 'opacity-100 translate-y-0'}
+        fixed top-6 left-1/2 z-[200]
+        flex items-center gap-4 px-6 py-3.5 rounded-full 
+        bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl
+        ring-1 ring-white/10
+        ${isFading ? 'animate-toast-exit' : 'animate-toast-reveal'}
       `}
     >
-      <div className="bg-emerald-500/20 rounded-full p-1.5 border border-emerald-500/30">
-        <ShieldCheck className="h-4 w-4 text-emerald-400" />
+      <div className="relative">
+        <div className="absolute inset-0 bg-cyan-500/50 blur-lg animate-pulse rounded-full"></div>
+        <div className="relative bg-cyan-600/30 rounded-full p-1.5 border border-cyan-400/40">
+          <Zap className="h-4 w-4 text-cyan-300" />
+        </div>
       </div>
-      <span className="text-sm font-medium text-slate-200 whitespace-nowrap">
-        Arena is cached for offline battle
+      
+      <span className="text-sm font-bold tracking-wide text-shimmer whitespace-nowrap">
+        Neural link established. Ready for high-speed engagement.
       </span>
     </div>
   );
