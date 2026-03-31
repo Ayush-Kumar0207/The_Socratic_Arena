@@ -1,0 +1,7 @@
+# Local helper scripts (not required for app runtime)
+frontend/run_lint.bat
+frontend/run_build.bat
+
+# Local scratch/temp artifacts
+tmp
+tmp/

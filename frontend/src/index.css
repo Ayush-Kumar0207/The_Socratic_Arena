@@ -138,4 +138,12 @@ button.keep-cursor:disabled {
   animation: shimmerFade 4s linear infinite;
 }
 
-
+/* Remove tap/click focus ring on the Dashboard cognitive chart */
+.cognitive-radar *,
+.cognitive-radar *:focus,
+.cognitive-radar *:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+

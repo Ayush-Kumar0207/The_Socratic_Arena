@@ -166,6 +166,12 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
     };
 
     const handleMarkedRead = () => {
+      // Keep server as source of truth, but avoid perceived lag with local optimistic state.
+      setNotifications(prev => {
+        const updated = prev.map(n => ({ ...n, is_read: true }));
+        localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(updated));
+        return updated;
+      });
       socket.emit('fetch_notifications');
     };
 
@@ -224,6 +230,12 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
 
   const handleMarkAllRead = () => {
     if (!socket) return;
+    // Optimistic update for instant UI feedback.
+    setNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, is_read: true }));
+      localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(updated));
+      return updated;
+    });
     socket.emit('mark_notifications_read', { notificationIds: [] });
   };
 
@@ -232,13 +244,18 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
     socket.emit('clear_notifications', { notificationIds: [] });
     setShowClearConfirm(false);
     setNotifications([]);
+    localStorage.setItem(`notifs_${user?.id}`, JSON.stringify([]));
   };
 
   const handleClearOne = (notifId) => {
     if (!socket) return;
     socket.emit('clear_notifications', { notificationIds: [notifId] });
     // Optimistic removal
-    setNotifications(prev => prev.filter(n => n.id !== notifId));
+    setNotifications(prev => {
+      const updated = prev.filter(n => n.id !== notifId);
+      localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const getTimeAgo = (dateStr) => {

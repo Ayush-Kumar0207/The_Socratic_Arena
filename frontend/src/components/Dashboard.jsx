@@ -157,7 +157,7 @@ const Dashboard = ({ user, socket }) => {
   ], [averageStats]);
 
   const memoizedRadarChart = useMemo(() => (
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} className="cognitive-radar focus:outline-none">
       <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
         <PolarGrid stroke="#334155" />
         <PolarAngleAxis 
@@ -228,7 +228,7 @@ const Dashboard = ({ user, socket }) => {
               <BarChart3 className="h-5 w-5 text-cyan-400" />
               Cognitive Profile
             </h2>
-            <div className="h-64 w-full mt-4">
+            <div className="h-64 w-full mt-4 select-none">
               {memoizedRadarChart}
             </div>
             {averageStats.logic === 0 && (

@@ -494,7 +494,7 @@ const Login = ({ initialView, onResetComplete }) => {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-300 transition-colors"
+                  className="absolute right-3 bottom-0 h-[48px] flex items-center justify-center text-slate-400 hover:text-slate-300 transition-colors"
                 >
                   {showPassword ? (
                     <EyeOff className="w-5 h-5" />
@@ -514,7 +514,7 @@ const Login = ({ initialView, onResetComplete }) => {
                       setResetEmail(email); // Pre-fill with current email if entered
                       setResetError('');
                     }}
-                    className="text-xs text-amber-400/80 hover:text-amber-300 transition-colors font-medium"
+                    className="text-xs text-cyan-400/80 hover:text-cyan-300 transition-colors font-medium"
                   >
                     Forgot password?
                   </button>

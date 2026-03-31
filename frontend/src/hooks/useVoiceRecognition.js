@@ -330,6 +330,11 @@ export default function useVoiceRecognition({
   const restartTimerRef = useRef(null);
   const volumeAnimationRef = useRef(null); // New: Animation loop for volume
   const linguisticPulseRef = useRef(0); // New: For simulated volume on iOS
+  
+  // MOBILE FIX: Track if speech recognition is actually working
+  const lastResultTimestampRef = useRef(0); // When we last got ANY result
+  const speechCheckTimerRef = useRef(null); // Timer to check if speech is being recognized
+  const hasReceivedSpeechRef = useRef(false); // Did we ever receive speech in this session?
 
   // ── Acoustic-Semantic Lock: The Three Dimensional Trackers ──
 
@@ -781,17 +786,15 @@ export default function useVoiceRecognition({
     // MOBILE DETECTION: Adjust recognition settings per platform
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isAndroid = /Android/i.test(navigator.userAgent);
 
     const recognition = new SpeechRecognitionAPI();
 
-    // KEY: "continuous: false" forces a short-burst cycle.
-    // The engine stops after each sentence and we auto-restart in onend.
-    // This keeps the internal buffer small and prevents the engine from
-    // going deaf — while our masterTranscriptBuffer persists across cycles.
-    // 
-    // MOBILE NOTE: On iOS Safari, continuous mode is more reliable for
-    // longer dictation, but we stick with short-burst for consistency.
-    recognition.continuous = false;
+    // MOBILE FIX: Use continuous mode on mobile for better reliability
+    // Android Chrome and iOS Safari both handle continuous mode better than short-burst
+    // for sustained voice input in practice.
+    // On desktop, short-burst prevents the "going deaf" bug.
+    recognition.continuous = isMobile ? true : false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
     recognition.maxAlternatives = 1;
@@ -799,11 +802,53 @@ export default function useVoiceRecognition({
 
     // ── onstart: Session opened ──
     recognition.onstart = () => {
-      console.log('[Voice] Session Active ✅', isMobile ? '(Mobile)' : '(Desktop)');
+      console.log('[Voice] Session Active ✅', isMobile ? '(Mobile)' : '(Desktop)', `continuous=${recognition.continuous}`);
+      
+      // MOBILE FIX: Start a timer to check if we're getting speech recognition results
+      // If audio is working (volume changes) but no results after 5 seconds, warn user
+      if (isMobile && !hasReceivedSpeechRef.current) {
+        if (speechCheckTimerRef.current) clearTimeout(speechCheckTimerRef.current);
+        speechCheckTimerRef.current = setTimeout(() => {
+          // Check if we've received any result since starting
+          if (isListeningRef.current && !hasReceivedSpeechRef.current) {
+            console.warn('[Voice] Mobile speech recognition may not be working');
+            setError('Speech not detected. Try speaking louder or check browser settings.');
+          }
+        }, 6000); // 6 second timeout
+      }
+    };
+
+    // ── onspeechstart: User started speaking ──
+    recognition.onspeechstart = () => {
+      console.log('[Voice] Speech detected ✅');
+      hasReceivedSpeechRef.current = true;
+      // Clear the "not working" timer since we detected speech
+      if (speechCheckTimerRef.current) {
+        clearTimeout(speechCheckTimerRef.current);
+        speechCheckTimerRef.current = null;
+      }
+      // Clear any error about speech not being detected
+      setError(null);
+    };
+
+    // ── onaudiostart: Mic audio started ──
+    recognition.onaudiostart = () => {
+      console.log('[Voice] Audio capture started');
     };
 
     // ── onresult: Process interim & final chunks ──
     recognition.onresult = (event) => {
+      // Mark that we've received results - speech recognition IS working
+      hasReceivedSpeechRef.current = true;
+      lastResultTimestampRef.current = Date.now();
+      
+      // Clear any "not working" error
+      if (speechCheckTimerRef.current) {
+        clearTimeout(speechCheckTimerRef.current);
+        speechCheckTimerRef.current = null;
+      }
+      setError(null);
+      
       let interimTranscript = '';
       let finalChunk = '';
 
@@ -843,9 +888,12 @@ export default function useVoiceRecognition({
         setTimeout(() => {
           if (isListeningRef.current) createAndStartRecognition();
         }, 500);
-      } else if (event.error === 'network' && isMobile) {
-        // MOBILE FIX: Network errors are common on mobile with poor connectivity
-        setError('Network error. Check connection.');
+      } else if (event.error === 'network') {
+        // MOBILE FIX: Network errors mean Google's speech servers are unreachable
+        // This is a common cause of "audio works but no text" on Android
+        setError('Network error. Speech service unavailable.');
+      } else if (event.error === 'service-not-allowed') {
+        setError('Speech service not allowed. Check browser permissions.');
       }
     };
 
@@ -893,6 +941,13 @@ export default function useVoiceRecognition({
     isListeningRef.current = false;
     setIsListening(false);
     setInterimText('');
+    
+    // Clear speech check timer
+    if (speechCheckTimerRef.current) {
+      clearTimeout(speechCheckTimerRef.current);
+      speechCheckTimerRef.current = null;
+    }
+    
     killRecognition();
     releaseStream();
   }, [killRecognition, releaseStream]);
@@ -908,6 +963,10 @@ export default function useVoiceRecognition({
     }
 
     setError(null);
+    
+    // Reset speech tracking for this session
+    hasReceivedSpeechRef.current = false;
+    lastResultTimestampRef.current = 0;
 
     // MOBILE FIX: Detect if we're on mobile for platform-specific handling
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -999,6 +1058,13 @@ export default function useVoiceRecognition({
   useEffect(() => {
     return () => {
       isListeningRef.current = false;
+      
+      // Clear all timers
+      if (speechCheckTimerRef.current) {
+        clearTimeout(speechCheckTimerRef.current);
+        speechCheckTimerRef.current = null;
+      }
+      
       killRecognition();
       if (audioSourceRef.current) {
         try { audioSourceRef.current.disconnect(); } catch (e) { /* noop */ }

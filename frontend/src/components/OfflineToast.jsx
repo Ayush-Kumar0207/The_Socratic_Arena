@@ -34,9 +34,9 @@ const OfflineToast = ({ session }) => {
   if (!isVisible) return null;
 
   return (
-    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] pointer-events-none">
+    <div className="fixed top-4 sm:top-6 left-1/2 -translate-x-1/2 z-[200] pointer-events-none w-[calc(100vw-1rem)] sm:w-auto px-2 sm:px-0">
       <div 
-        className="flex items-center gap-4 px-6 py-3.5 rounded-full bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-magical-toast"
+        className="flex items-start sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3 sm:py-3.5 rounded-2xl sm:rounded-full bg-slate-950/60 border border-slate-700/50 shadow-2xl backdrop-blur-xl ring-1 ring-white/10 animate-magical-toast max-w-full"
       >
         <div className="relative">
           <div className="absolute inset-0 bg-cyan-500/50 blur-lg animate-pulse rounded-full"></div>
@@ -45,7 +45,7 @@ const OfflineToast = ({ session }) => {
           </div>
         </div>
         
-        <span className="text-sm font-bold tracking-wide text-shimmer whitespace-nowrap">
+        <span className="text-xs sm:text-sm font-bold tracking-wide text-shimmer leading-tight sm:leading-normal break-words">
           Neural link established. Ready for high-speed engagement.
         </span>
       </div>
