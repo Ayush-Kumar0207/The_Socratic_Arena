@@ -50,7 +50,16 @@ const App = () => {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegistered(r) { console.log('[PWA] SW Registered:', r); },
+    onRegistered(r) {
+      console.log('[PWA] SW Registered:', r);
+      // Periodic Update Heartbeat — check for new deployments every 20 mins
+      if (r) {
+        setInterval(() => {
+          console.log('[PWA] Checking for updates...');
+          r.update().catch(err => console.error('[PWA] Update Check Failed:', err));
+        }, 20 * 60 * 1000);
+      }
+    },
     onRegisterError(error) { console.error('[PWA] SW Registration Error:', error); },
   });
 
