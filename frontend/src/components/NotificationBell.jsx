@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, Swords, Check, X, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronRight, Trash2, RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 
 const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateServiceWorker }) => {
   const navigate = useNavigate();
@@ -34,19 +35,23 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       const challengeAcceptedNotifs = notifs.filter(n => n.type === 'challenge_accepted' && n.metadata?.arena_id);
       
       if (challengeAcceptedNotifs.length > 0) {
-        const arenaIds = challengeAcceptedNotifs.map(n => n.metadata.arena_id);
-        const { data: matches } = await supabase
-          .from('matches')
-          .select('id, status')
-          .in('id', arenaIds);
+        try {
+          const arenaIds = challengeAcceptedNotifs.map(n => n.metadata.arena_id);
+          const { data: matches } = await supabase
+            .from('matches')
+            .select('id, status')
+            .in('id', arenaIds);
 
-        if (matches) {
-          const statusMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
-          notifs.forEach(n => {
-            if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
-              n.metadata.match_status = statusMap[n.metadata.arena_id] || 'unknown';
-            }
-          });
+          if (matches) {
+            const statusMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
+            notifs.forEach(n => {
+              if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
+                n.metadata.match_status = statusMap[n.metadata.arena_id] || 'unknown';
+              }
+            });
+          }
+        } catch (err) {
+          console.error('[NotificationBell] Failed to fetch match statuses for notifications:', err);
         }
       }
 
