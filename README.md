@@ -402,21 +402,45 @@ Gemini 2.5 Flash analyzes the full transcript and scores each debater on **Logic
 </details>
 
 <details>
-<summary><strong>What happens if someone disconnects mid-debate?</strong></summary>
+<summary><strong>How are the Critic and Defender roles assigned?</strong></summary>
 
-The system detects disconnection via Socket.IO, waits briefly for reconnection, then automatically marks the match as "abandoned." The remaining player receives an Elo advantage, and the match transcript is preserved.
+The platform uses **Dynamic Stance Mapping**. When a topic is searched or created (e.g., "AI vs. Humans"), the system automatically parses the prompt and generates tailored, context-aware mission objectives for each role (Stance A and Stance B). Roles are then assigned based on who joins first, or randomly in paired matches.
 </details>
 
 <details>
-<summary><strong>How does the Elo system work?</strong></summary>
+<summary><strong>How does the Voice Affective Engine work?</strong></summary>
 
-Standard Elo with a dynamic K-factor: K=50 for newcomers (< 10 matches), K=30 for established players, K=15 for elite (> 1800 Elo). A performance bonus of +5 Elo is awarded for winning with 90%+ audience support.
+The Socratic Arena uses a high-fidelity **Acoustic-Semantic Lock**. It distinguishes between dictation and commands, automatically appends punctuation based on vocal peaks (Interrogation patterns/RMS), and renders your messages with vibrant, pulsing **Visual Auras** (Indigo for Inquisitive, Rose for Urgent) synced in real-time across all clients.
+</details>
+
+<details>
+<summary><strong>What happens if someone disconnects mid-debate?</strong></summary>
+
+The system detects disconnection via Socket.IO, waits 30 seconds for reconnection, then automatically marks the match as "abandoned." The remaining player receives an Elo advantage, and the match transcript is preserved for review.
+</details>
+
+<details>
+<summary><strong>How does the Elo system work and what are the ranks?</strong></summary>
+
+We use a dynamic K-factor: K=50 for newcomers (< 10 matches), K=30 for established, and K=15 for elite (> 1800 Elo). As you climb, you progress through 5 tiers: **Novice** → **Thinker** → **Scholar** → **Philosopher** → **Oracle**. Oracle status is reserved for the absolute elite of intellectual combat.
+</details>
+
+<details>
+<summary><strong>What is the significance of the 24-hour deliberation period?</strong></summary>
+
+Every debate remains "In Deliberation" for 24 hours to allow the community to watch and vote. This ensures the 30% audience weight is statistically significant, countering any potential AI bias and rewarding debaters who resonate with human reason.
 </details>
 
 <details>
 <summary><strong>Can I create my own debate topics?</strong></summary>
 
-Yes! Use the search bar on the Explore page or the "Create Arena" button in the navbar. New topics are validated by the AI Bouncer (prevents duplicates/spam) and automatically categorized using Gemini AI.
+Yes! Use the search bar on the Explore page or the "Create Arena" button. New topics are validated by our AI Bouncer (to prevent duplicates/spam) and automatically categorized using Gemini-powered domain analysis before being published to the Discovery Hub.
+</details>
+
+<details>
+<summary><strong>Can I install The Socratic Arena as an app?</strong></summary>
+
+Yes! The platform is a fully compliant **Progressive Web App (PWA)**. Simply click "Install" in your browser's address bar or add it to your home screen on mobile. You'll receive real-time update notifications and benefit from offline resilience.
 </details>
 
 ---
