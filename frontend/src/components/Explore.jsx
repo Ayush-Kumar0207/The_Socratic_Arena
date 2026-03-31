@@ -509,8 +509,14 @@ const Explore = ({ socket, user }) => {
 
   const groupMatches = (matches) => {
     const groups = {};
+    const seenIds = new Set(); // Deduplicate by match ID
     matches
-      .filter(m => (m.topic_title || m.topic) && (m.topic_title || m.topic).toLowerCase() !== 'custom debate')
+      .filter(m => {
+        // Skip duplicates
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return (m.topic_title || m.topic) && (m.topic_title || m.topic).toLowerCase() !== 'custom debate';
+      })
       .forEach(m => {
         const title = m.topic_title || m.topic;
         if (!groups[title]) groups[title] = [];

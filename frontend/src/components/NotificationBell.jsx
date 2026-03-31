@@ -37,16 +37,48 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       if (challengeAcceptedNotifs.length > 0) {
         try {
           const arenaIds = challengeAcceptedNotifs.map(n => n.metadata.arena_id);
-          const { data: matches } = await supabase
-            .from('matches')
-            .select('id, status')
+          
+          // First get the match_id from private_arenas table
+          const { data: arenas } = await supabase
+            .from('private_arenas')
+            .select('id, match_id, status')
             .in('id', arenaIds);
 
-          if (matches) {
-            const statusMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
+          if (arenas && arenas.length > 0) {
+            // Get match IDs (filter out nulls - debate not started yet)
+            const matchIds = arenas.filter(a => a.match_id).map(a => a.match_id);
+            
+            let matchStatusMap = {};
+            if (matchIds.length > 0) {
+              const { data: matches } = await supabase
+                .from('matches')
+                .select('id, status')
+                .in('id', matchIds);
+              
+              if (matches) {
+                matchStatusMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
+              }
+            }
+
+            // Map arena_id -> match status
+            const arenaToMatchStatus = {};
+            arenas.forEach(a => {
+              if (a.match_id && matchStatusMap[a.match_id]) {
+                arenaToMatchStatus[a.id] = matchStatusMap[a.match_id];
+              } else if (a.status === 'paired') {
+                // Arena is paired but debate hasn't started yet - show Enter Lobby
+                arenaToMatchStatus[a.id] = 'waiting';
+              } else if (a.status === 'started') {
+                // Arena started but match not found - likely in progress
+                arenaToMatchStatus[a.id] = 'active';
+              } else {
+                arenaToMatchStatus[a.id] = a.status || 'unknown';
+              }
+            });
+
             notifs.forEach(n => {
               if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
-                n.metadata.match_status = statusMap[n.metadata.arena_id] || 'unknown';
+                n.metadata.match_status = arenaToMatchStatus[n.metadata.arena_id] || 'unknown';
               }
             });
           }
@@ -511,8 +543,10 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                               const isEnded = matchStatus === 'completed' || matchStatus === 'pending_votes';
                               // Match expired if it was abandoned (timed out or everyone left)
                               const isExpired = matchStatus === 'abandoned';
-                              // If match is no longer active, show specific status badge
-                              const isInactive = (matchStatus && matchStatus !== 'active') || (!matchStatus && (new Date() - new Date(notif.created_at)) > 30 * 60 * 1000);
+                              // Show Enter Lobby for: active, waiting (paired but not started), or unknown
+                              const isActive = !matchStatus || matchStatus === 'active' || matchStatus === 'waiting' || matchStatus === 'unknown' || matchStatus === 'paired';
+                              // Only hide if explicitly ended/expired/abandoned
+                              const isInactive = isEnded || isExpired || matchStatus === 'abandoned';
                               
                               if (isInactive) {
                                 let statusText = 'Debate Closed';

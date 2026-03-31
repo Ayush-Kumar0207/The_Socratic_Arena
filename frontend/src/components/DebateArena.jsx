@@ -71,6 +71,9 @@ const DebateArena = ({
   const [roomId, setRoomId] = useState(matchId || null);
   const [topic, setTopic] = useState(initialTopic || '');
   
+  // Timer sync timestamp to prevent flickering from out-of-order events
+  const lastTimeSyncRef = useRef(0);
+
   // Rehydrate stances if missing (e.g., on refresh)
   const stances = useMemo(() => {
     if (initialStances) return initialStances;
@@ -283,7 +286,20 @@ const DebateArena = ({
     if (!socket) return;
 
     const handleMatchFound = (data) => {
-      const role = data.roles?.[socket.id] || 'Unknown';
+      // CRITICAL FIX: Determine role by user ID first (reliable), socket ID fallback (transient)
+      let role = 'Unknown';
+      if (user?.id) {
+        if (data.criticUserId === user.id) {
+          role = 'Critic';
+        } else if (data.defenderUserId === user.id) {
+          role = 'Defender';
+        }
+      }
+      // Fallback to socket-based role detection for transient matches
+      if (role === 'Unknown' && data.roles) {
+        role = data.roles[socket.id] || 'Spectator';
+      }
+      
       setRoomId(data.roomId);
       setPlayerRole(role);
       setMatchStatus('active');
@@ -291,9 +307,18 @@ const DebateArena = ({
       setActiveSpeaker(data.activeSpeaker || 'Critic');
       setTopic(data.topic || '');
       setIsInitializing(false); // Unlock UI for transient rooms
+      // Reset timer sync on match found
+      lastTimeSyncRef.current = 0;
     };
 
-    const handleTimeSync = ({ criticTime: ct, defenderTime: dt, activeSpeaker: as }) => {
+    const handleTimeSync = ({ criticTime: ct, defenderTime: dt, activeSpeaker: as, timestamp }) => {
+      // Prevent flickering from out-of-order or duplicate time_sync events
+      const ts = timestamp || Date.now();
+      if (ts < lastTimeSyncRef.current) {
+        return; // Ignore stale time_sync
+      }
+      lastTimeSyncRef.current = ts;
+      
       setCriticTime(ct);
       setDefenderTime(dt);
       setActiveSpeaker(as);

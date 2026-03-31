@@ -541,11 +541,12 @@ const startRoomTimer = (roomId) => {
       room.defenderTime = Math.max(0, room.defenderTime - 1);
     }
 
-    // Broadcast time sync to room
+    // Broadcast time sync to room (include timestamp to prevent flickering)
     io.to(roomId).emit('time_sync', {
       criticTime: room.criticTime,
       defenderTime: room.defenderTime,
-      activeSpeaker: room.activeSpeaker
+      activeSpeaker: room.activeSpeaker,
+      timestamp: Date.now()
     });
 
     // Check for timeout
@@ -969,6 +970,8 @@ io.on('connection', (socket) => {
       io.to(roomId).emit('match_found', {
         roomId,
         topic: topicTitle,
+        criticUserId: critic.userId,
+        defenderUserId: defender.userId,
         roles: {
           [critic.socketId]: 'Critic',
           [defender.socketId]: 'Defender'
@@ -976,7 +979,7 @@ io.on('connection', (socket) => {
       });
 
       startRoomTimer(roomId);
-      io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic' });
+      io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic', timestamp: Date.now() });
 
       // Track match for disconnects
       [critic, defender].forEach(p => {
@@ -1035,6 +1038,8 @@ io.on('connection', (socket) => {
     socket.emit('match_found', {
       roomId,
       topic: room.topic,
+      criticUserId: room.critic_id,
+      defenderUserId: room.defender_id,
       roles: {
         [room.players.critic]: 'Critic',
         [room.players.defender]: 'Defender'
@@ -1377,6 +1382,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
 
       socket.join(`private_${data.id}`);
       socket.privateArenaId = data.id;
+      socket.privateArenaRole = 'creator'; // Tag socket as creator
 
       console.log(`[Private Arena] Created: ${arenaCode} for topic "${topicTitle}" by ${userId}`);
       socket.emit('private_arena_created', { arenaCode, arenaId: data.id });
@@ -1491,8 +1497,10 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       // --- Join socket room and notify pairing ---
       socket.join(`private_${arena.id}`);
       socket.privateArenaId = arena.id;
+      // Tag socket with its role for proper critic/defender assignment later
+      socket.privateArenaRole = (arena.creator_id === userId) ? 'creator' : 'joiner';
 
-      console.log(`[Private Arena] Client ${userId} joined room private_${arena.id} (Status: ${arena.status})`);
+      console.log(`[Private Arena] Client ${userId} joined room private_${arena.id} as ${socket.privateArenaRole} (Status: ${arena.status})`);
 
       if (arena.creator_id && arena.joiner_id) {
         io.to(`private_${arena.id}`).emit('private_arena_joined', {
@@ -1615,16 +1623,34 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
 
       // Get sockets in private room and move them to match room
       const socketsInRoom = await io.in(`private_${arenaId}`).fetchSockets();
-      const criticSocket = socketsInRoom.find(s => s.privateArenaRole === 'creator' ? creatorRole === 'Critic' : joinerRole === 'Critic');
-      const defenderSocket = socketsInRoom.find(s => s !== criticSocket);
-
+      
+      // CRITICAL FIX: Properly identify critic and defender sockets by their tagged roles
+      let criticSid = null;
+      let defenderSid = null;
+      
       for (const s of socketsInRoom) {
         s.join(roomId);
         s.currentMatchId = roomId;
+        
+        // Determine if this socket's owner is the critic or defender
+        if (s.privateArenaRole === 'creator') {
+          if (creatorRole === 'Critic') {
+            criticSid = s.id;
+          } else {
+            defenderSid = s.id;
+          }
+        } else if (s.privateArenaRole === 'joiner') {
+          if (joinerRole === 'Critic') {
+            criticSid = s.id;
+          } else {
+            defenderSid = s.id;
+          }
+        }
       }
-
-      const criticSid = socketsInRoom[0]?.id || 'unknown';
-      const defenderSid = socketsInRoom[1]?.id || socketsInRoom[0]?.id || 'unknown';
+      
+      // Fallback to array order if roles weren't properly tagged
+      if (!criticSid) criticSid = socketsInRoom[0]?.id || 'unknown';
+      if (!defenderSid) defenderSid = socketsInRoom[1]?.id || socketsInRoom[0]?.id || 'unknown';
 
       activeRooms[roomId] = {
         players: { critic: criticSid, defender: defenderSid },
@@ -1656,9 +1682,9 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       });
 
       startRoomTimer(roomId);
-      io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic' });
+      io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic', timestamp: Date.now() });
 
-      console.log(`[Private Arena] Debate started! Room: ${roomId}, Topic: "${arena.topic_title}"`);
+      console.log(`[Private Arena] Debate started! Room: ${roomId}, Topic: "${arena.topic_title}", Critic: ${criticSid}, Defender: ${defenderSid}`);
     } catch (err) {
       console.error('[Private Arena] Start error:', err);
       socket.emit('private_arena_error', { message: 'Failed to start debate.' });

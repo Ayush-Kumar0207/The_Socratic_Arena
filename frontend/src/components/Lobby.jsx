@@ -37,7 +37,19 @@ const Lobby = ({ socket, user }) => {
 
     // --- Normal matchmaking listeners ---
     const handleMatchFound = (data) => {
-      const assignedRole = data.roles ? data.roles[socket.id] : null;
+      // CRITICAL FIX: Determine role by user ID first (reliable), socket ID fallback
+      let assignedRole = null;
+      if (user?.id) {
+        if (data.criticUserId === user.id) {
+          assignedRole = 'Critic';
+        } else if (data.defenderUserId === user.id) {
+          assignedRole = 'Defender';
+        }
+      }
+      // Fallback to socket-based role detection
+      if (!assignedRole && data.roles) {
+        assignedRole = data.roles[socket.id] || null;
+      }
       navigate(`/arena/${data.roomId}`, { state: { ...data, assignedRole, stances } });
     };
 
