@@ -32,6 +32,7 @@ const Lobby = ({ socket, user }) => {
   const stances = useMemo(() => generateStances(topic.title), [topic.title]);
 
   useEffect(() => {
+    console.log("[Lobby] Rendered - Version: 1.0.1 (WakingMsgRemoved)");
     if (!socket) return;
 
     // --- Normal matchmaking listeners ---
@@ -215,7 +216,7 @@ const Lobby = ({ socket, user }) => {
   ];
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8 items-center justify-center">
+    <div data-v="1.0.2-clean-arena" className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8 items-center justify-center">
       <div className="max-w-4xl w-full bg-slate-900/50 backdrop-blur-md border border-[#1e293b] rounded-3xl p-8 sm:p-12 shadow-2xl relative overflow-hidden">
         
         {/* Decorative corner glows */}

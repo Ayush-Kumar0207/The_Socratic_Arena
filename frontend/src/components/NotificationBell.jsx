@@ -26,11 +26,32 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
     // Initial fetch
     socket.emit('fetch_notifications');
 
-    const handleList = ({ notifications: notifs }) => {
-      if (notifs) {
-        setNotifications(notifs);
-        localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(notifs));
+    const handleList = async ({ notifications: notifs }) => {
+      if (!notifs) return;
+
+      // PROACTIVE SYNC: Check match statuses for challenge_accepted items
+      // This ensures "Enter Lobby" vanishes IMMEDIATELY if the debate ended
+      const challengeAcceptedNotifs = notifs.filter(n => n.type === 'challenge_accepted' && n.metadata?.arena_id);
+      
+      if (challengeAcceptedNotifs.length > 0) {
+        const arenaIds = challengeAcceptedNotifs.map(n => n.metadata.arena_id);
+        const { data: matches } = await supabase
+          .from('matches')
+          .select('id, status')
+          .in('id', arenaIds);
+
+        if (matches) {
+          const statusMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
+          notifs.forEach(n => {
+            if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
+              n.metadata.match_status = statusMap[n.metadata.arena_id] || 'unknown';
+            }
+          });
+        }
       }
+
+      setNotifications([...notifs]);
+      localStorage.setItem(`notifs_${user?.id}`, JSON.stringify(notifs));
     };
 
     // Real-time: new challenge received
@@ -479,12 +500,34 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                             )}
 
                             {/* Navigate to lobby for accepted challenges (Fix #6 & #7: works for both users) */}
-                            {notif.type === 'challenge_accepted' && notif.metadata?.arena_code && (
-                              notif.metadata?.match_status && notif.metadata.match_status !== 'active' ? (
-                                <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-500 font-bold uppercase">
-                                  <Clock className="h-3 w-3" /> Debate {notif.metadata.match_status === 'abandoned' ? 'Expired' : 'Ended'}
-                                </div>
-                              ) : (
+                            {notif.type === 'challenge_accepted' && notif.metadata?.arena_code && (() => {
+                              const matchStatus = notif.metadata?.match_status;
+                              // Match ended if it's completed or awaiting votes
+                              const isEnded = matchStatus === 'completed' || matchStatus === 'pending_votes';
+                              // Match expired if it was abandoned (timed out or everyone left)
+                              const isExpired = matchStatus === 'abandoned';
+                              // If match is no longer active, show specific status badge
+                              const isInactive = (matchStatus && matchStatus !== 'active') || (!matchStatus && (new Date() - new Date(notif.created_at)) > 30 * 60 * 1000);
+                              
+                              if (isInactive) {
+                                let statusText = 'Debate Closed';
+                                let statusColor = 'text-slate-500';
+                                if (isEnded) {
+                                  statusText = 'Debate Ended';
+                                  statusColor = 'text-emerald-400';
+                                } else if (isExpired) {
+                                  statusText = 'Debate Expired';
+                                  statusColor = 'text-amber-500';
+                                }
+
+                                return (
+                                  <div className={`mt-2.5 flex items-center gap-1.5 text-[10px] ${statusColor} font-bold uppercase tracking-wider`}>
+                                    <Clock className={`h-3 w-3 ${statusColor}`} /> {statusText}
+                                  </div>
+                                );
+                              }
+
+                              return (
                                 <button
                                   onClick={() => {
                                     setIsOpen(false);
@@ -495,12 +538,12 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                                       }
                                     });
                                   }}
-                                  className="mt-2 flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-bold transition"
+                                  className="mt-2.5 flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 font-bold transition-all hover:translate-x-0.5"
                                 >
                                   Enter Lobby <ChevronRight className="h-3 w-3" />
                                 </button>
-                              )
-                            )}
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
