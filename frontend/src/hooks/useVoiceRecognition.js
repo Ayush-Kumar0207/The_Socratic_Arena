@@ -328,6 +328,7 @@ export default function useVoiceRecognition({
   const isListeningRef = useRef(false);
   const streamRef = useRef(null);
   const restartTimerRef = useRef(null);
+  const noResultRestartTimerRef = useRef(null);
   const volumeAnimationRef = useRef(null); // New: Animation loop for volume
   const linguisticPulseRef = useRef(0); // New: For simulated volume on iOS
   
@@ -335,6 +336,7 @@ export default function useVoiceRecognition({
   const lastResultTimestampRef = useRef(0); // When we last got ANY result
   const speechCheckTimerRef = useRef(null); // Timer to check if speech is being recognized
   const hasReceivedSpeechRef = useRef(false); // Did we ever receive speech in this session?
+  const speechStartedRef = useRef(false); // Did browser detect speech audio in this cycle?
 
   // ── Acoustic-Semantic Lock: The Three Dimensional Trackers ──
 
@@ -668,12 +670,18 @@ export default function useVoiceRecognition({
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
+    if (noResultRestartTimerRef.current) {
+      clearTimeout(noResultRestartTimerRef.current);
+      noResultRestartTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.onresult = null;
         recognitionRef.current.onend = null;
         recognitionRef.current.onerror = null;
         recognitionRef.current.onstart = null;
+        recognitionRef.current.onspeechstart = null;
+        recognitionRef.current.onaudiostart = null;
         recognitionRef.current.abort();
       } catch (e) { /* noop */ }
       recognitionRef.current = null;
@@ -786,23 +794,20 @@ export default function useVoiceRecognition({
     // MOBILE DETECTION: Adjust recognition settings per platform
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const isAndroid = /Android/i.test(navigator.userAgent);
-
     const recognition = new SpeechRecognitionAPI();
 
-    // MOBILE FIX: Use continuous mode on mobile for better reliability
-    // Android Chrome and iOS Safari both handle continuous mode better than short-burst
-    // for sustained voice input in practice.
-    // On desktop, short-burst prevents the "going deaf" bug.
-    recognition.continuous = isMobile ? true : false;
+    // On Android, short-burst + controlled restart is usually more reliable.
+    // On iOS, if supported, continuous tends to hold the session better.
+    recognition.continuous = isIOS;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = navigator.language || 'en-US';
     recognition.maxAlternatives = 1;
     recognitionRef.current = recognition;
 
     // ── onstart: Session opened ──
     recognition.onstart = () => {
       console.log('[Voice] Session Active ✅', isMobile ? '(Mobile)' : '(Desktop)', `continuous=${recognition.continuous}`);
+      speechStartedRef.current = false;
       
       // MOBILE FIX: Start a timer to check if we're getting speech recognition results
       // If audio is working (volume changes) but no results after 5 seconds, warn user
@@ -816,19 +821,32 @@ export default function useVoiceRecognition({
           }
         }, 6000); // 6 second timeout
       }
+
+      // Mobile watchdog: if speech starts but no transcript arrives, hard-restart recognizer.
+      if (isMobile) {
+        if (noResultRestartTimerRef.current) clearTimeout(noResultRestartTimerRef.current);
+        noResultRestartTimerRef.current = setTimeout(() => {
+          const noTranscriptYet = Date.now() - lastResultTimestampRef.current > 7000;
+          if (isListeningRef.current && noTranscriptYet && speechStartedRef.current) {
+            console.warn('[Voice] Mobile watchdog: speech detected but no transcript; restarting recognition.');
+            killRecognition();
+            setTimeout(() => {
+              if (isListeningRef.current) createAndStartRecognition();
+            }, 250);
+          }
+        }, 7000);
+      }
     };
 
     // ── onspeechstart: User started speaking ──
     recognition.onspeechstart = () => {
       console.log('[Voice] Speech detected ✅');
-      hasReceivedSpeechRef.current = true;
+      speechStartedRef.current = true;
       // Clear the "not working" timer since we detected speech
       if (speechCheckTimerRef.current) {
         clearTimeout(speechCheckTimerRef.current);
         speechCheckTimerRef.current = null;
       }
-      // Clear any error about speech not being detected
-      setError(null);
     };
 
     // ── onaudiostart: Mic audio started ──
@@ -846,6 +864,10 @@ export default function useVoiceRecognition({
       if (speechCheckTimerRef.current) {
         clearTimeout(speechCheckTimerRef.current);
         speechCheckTimerRef.current = null;
+      }
+      if (noResultRestartTimerRef.current) {
+        clearTimeout(noResultRestartTimerRef.current);
+        noResultRestartTimerRef.current = null;
       }
       setError(null);
       
@@ -901,6 +923,10 @@ export default function useVoiceRecognition({
     recognition.onend = () => {
       console.log('[Voice] Session Ended. Restarting...');
       setInterimText('');
+      if (noResultRestartTimerRef.current) {
+        clearTimeout(noResultRestartTimerRef.current);
+        noResultRestartTimerRef.current = null;
+      }
 
       // CRITICAL: We do NOT reset masterTranscriptBufferRef or
       // lastSpeechTimestampRef here. The rolling buffer must persist
@@ -910,7 +936,7 @@ export default function useVoiceRecognition({
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
         // MOBILE FIX: Longer delay on mobile to let audio hardware fully reset
         // iOS Safari in particular needs more time between recognition sessions
-        const restartDelay = isMobile ? 300 : 150;
+        const restartDelay = isMobile ? 450 : 150;
         restartTimerRef.current = setTimeout(() => {
           if (isListeningRef.current) {
             createAndStartRecognition();
@@ -972,75 +998,43 @@ export default function useVoiceRecognition({
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-    // Tiered Browser-Agnostic Mic Request (Failsafe constraints for mobile compatibility)
-    try {
-      let stream;
-      
-      if (isIOS) {
-        // iOS SPECIFIC: Use minimal constraints - iOS is very picky
-        console.log('[Voice] iOS detected - using minimal audio constraints');
+    // IMPORTANT: On many mobile browsers, holding a parallel getUserMedia stream
+    // can starve SpeechRecognition (mic contention). Let SpeechRecognition own mic.
+    const bypassManualMicCapture = isMobile;
+    if (!bypassManualMicCapture) {
+      try {
+        let stream;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-            }
-          });
-        } catch (e) {
-          console.warn('[Voice] iOS minimal constraints failed, trying bare audio...');
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        }
-      } else if (isMobile) {
-        // Android: Start with basic constraints, fall back to raw
-        console.log('[Voice] Android detected - using basic audio constraints');
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: { echoCancellation: true, noiseSuppression: true } 
-          });
-        } catch (e) {
-          console.warn('[Voice] Android basic constraints failed, trying raw audio...');
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        }
-      } else {
-        // Desktop: Full processing capabilities
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true } 
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true }
           });
         } catch (e) {
           console.warn('[Voice] Desktop Tier 1 failed, dropping autoGainControl...');
           try {
-            stream = await navigator.mediaDevices.getUserMedia({ 
-              audio: { echoCancellation: true, noiseSuppression: true } 
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true }
             });
           } catch (e2) {
             console.warn('[Voice] Desktop Tier 2 failed, requesting raw audio...');
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           }
         }
-      }
-      
-      streamRef.current = stream;
-      setAudioStream(stream);
 
-      // MOBILE FIX: On iOS, we need to initialize audio analysis IMMEDIATELY after
-      // getting the stream (within the same user gesture context) to avoid suspension
-      if (isIOS) {
-        // Initialize audio analysis right away for iOS
-        initAudioAnalysis(stream);
-      } else {
-        // Other platforms: Short delay to let OS audio hardware settle
+        streamRef.current = stream;
+        setAudioStream(stream);
         setTimeout(() => {
           if (isListeningRef.current) initAudioAnalysis(stream);
-        }, isMobile ? 100 : 250);
+        }, 250);
+      } catch (err) {
+        setError(`Mic Access Denied: ${err.message}`);
+        setIsListening(false);
+        isListeningRef.current = false;
+        return;
       }
-
-    } catch (err) {
-      setError(`Mic Access Denied: ${err.message}`);
-      setIsListening(false);
-      isListeningRef.current = false;
-      return;
+    } else {
+      console.log('[Voice] Mobile mode: SpeechRecognition owns microphone (no parallel getUserMedia capture).');
+      setAudioStream(null);
+      setVolume(0.15);
     }
 
     // Reset the Acoustic-Semantic Lock state for a fresh session
@@ -1063,6 +1057,10 @@ export default function useVoiceRecognition({
       if (speechCheckTimerRef.current) {
         clearTimeout(speechCheckTimerRef.current);
         speechCheckTimerRef.current = null;
+      }
+      if (noResultRestartTimerRef.current) {
+        clearTimeout(noResultRestartTimerRef.current);
+        noResultRestartTimerRef.current = null;
       }
       
       killRecognition();
