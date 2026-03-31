@@ -367,6 +367,7 @@ export default function useVoiceRecognition({
    * Returns a normalized 0–1 value, or -1 if unavailable.
    */
   const sampleCurrentEnergy = useCallback(() => {
+    // MOBILE FIX: Check if AudioContext is suspended and try to get some energy anyway
     if (!analyserRef.current) {
       // FALLBACK: Linguistic Drive (Simulated volume based on transcript activity)
       // This ensures the VoiceOrb still moves on platforms that block concurrent mic access.
@@ -378,6 +379,18 @@ export default function useVoiceRecognition({
     }
 
     const analyser = analyserRef.current;
+    const audioCtx = audioContextRef.current;
+    
+    // MOBILE FIX: If AudioContext is suspended, return linguistic pulse instead
+    // This commonly happens on iOS when audio is blocked
+    if (audioCtx && audioCtx.state === 'suspended') {
+      const pulse = linguisticPulseRef.current;
+      if (pulse > 0) {
+        linguisticPulseRef.current = Math.max(0, pulse - 0.05);
+      }
+      return linguisticPulseRef.current;
+    }
+
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     analyser.getByteFrequencyData(dataArray);
@@ -387,7 +400,17 @@ export default function useVoiceRecognition({
       sum += dataArray[i];
     }
     const avg = sum / bufferLength;
-    return Math.min(avg / 128, 1); // Normalize to 0–1
+    
+    // MOBILE FIX: On mobile, if we're getting zero readings but we have
+    // linguistic pulse, blend them to ensure some visual feedback
+    const normalizedEnergy = Math.min(avg / 128, 1);
+    if (normalizedEnergy < 0.01 && linguisticPulseRef.current > 0) {
+      const pulse = linguisticPulseRef.current;
+      linguisticPulseRef.current = Math.max(0, pulse - 0.05);
+      return pulse; // Use linguistic pulse when audio gives us nothing
+    }
+    
+    return normalizedEnergy;
   }, []);
 
   /**
@@ -686,16 +709,32 @@ export default function useVoiceRecognition({
    */
   const initAudioAnalysis = useCallback((stream) => {
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // MOBILE FIX: Use specific options for better iOS/Android compatibility
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+        // Lower sample rate for mobile compatibility
+        sampleRate: 44100,
+        // Reduce latency mode for faster responsiveness
+        latencyHint: 'interactive',
+      });
       
-      // CRITICAL FOR MOBILE: Always attempt to resume context on creation
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
+      // CRITICAL FOR MOBILE: Always attempt to resume context immediately
+      // iOS Safari requires this AND a user gesture (which we have from the button click)
+      const resumeContext = async () => {
+        if (audioCtx.state === 'suspended') {
+          try {
+            await audioCtx.resume();
+            console.log('[Voice:P5] AudioContext resumed successfully');
+          } catch (e) {
+            console.warn('[Voice:P5] Failed to resume AudioContext:', e);
+          }
+        }
+      };
+      resumeContext();
 
       const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.85;
+      // MOBILE FIX: Use smaller FFT size for faster processing on mobile
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.8;
 
       const source = audioCtx.createMediaStreamSource(stream);
       source.connect(analyser);
@@ -708,6 +747,12 @@ export default function useVoiceRecognition({
       // Start the volume tracking loop
       const updateVolume = () => {
         if (!isListeningRef.current) return;
+        
+        // MOBILE FIX: Re-check and resume AudioContext on each frame (iOS Safari workaround)
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+        
         setVolume(sampleCurrentEnergy());
         volumeAnimationRef.current = requestAnimationFrame(updateVolume);
       };
@@ -733,12 +778,19 @@ export default function useVoiceRecognition({
     // Kill any stale instance
     killRecognition();
 
+    // MOBILE DETECTION: Adjust recognition settings per platform
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
     const recognition = new SpeechRecognitionAPI();
 
     // KEY: "continuous: false" forces a short-burst cycle.
     // The engine stops after each sentence and we auto-restart in onend.
     // This keeps the internal buffer small and prevents the engine from
     // going deaf — while our masterTranscriptBuffer persists across cycles.
+    // 
+    // MOBILE NOTE: On iOS Safari, continuous mode is more reliable for
+    // longer dictation, but we stick with short-burst for consistency.
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
@@ -747,7 +799,7 @@ export default function useVoiceRecognition({
 
     // ── onstart: Session opened ──
     recognition.onstart = () => {
-      console.log('[Voice] Session Active ✅');
+      console.log('[Voice] Session Active ✅', isMobile ? '(Mobile)' : '(Desktop)');
     };
 
     // ── onresult: Process interim & final chunks ──
@@ -779,11 +831,21 @@ export default function useVoiceRecognition({
       // These are benign — they fire when the engine restarts or hears nothing
       if (event.error === 'no-speech' || event.error === 'aborted') return;
 
-      console.error('[Voice] Error:', event.error);
+      console.error('[Voice] Error:', event.error, isMobile ? '(Mobile)' : '(Desktop)');
 
       if (event.error === 'not-allowed') {
         setError('Microphone access denied.');
         stopListeningFn();
+      } else if (event.error === 'audio-capture' && isMobile) {
+        // MOBILE FIX: On some mobile browsers, audio-capture error can occur
+        // when the mic is briefly unavailable. Retry after a short delay.
+        console.warn('[Voice] Mobile audio-capture error, retrying...');
+        setTimeout(() => {
+          if (isListeningRef.current) createAndStartRecognition();
+        }, 500);
+      } else if (event.error === 'network' && isMobile) {
+        // MOBILE FIX: Network errors are common on mobile with poor connectivity
+        setError('Network error. Check connection.');
       }
     };
 
@@ -798,12 +860,14 @@ export default function useVoiceRecognition({
 
       if (isListeningRef.current) {
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-        // Wait 150ms to let the hardware settle before restarting
+        // MOBILE FIX: Longer delay on mobile to let audio hardware fully reset
+        // iOS Safari in particular needs more time between recognition sessions
+        const restartDelay = isMobile ? 300 : 150;
         restartTimerRef.current = setTimeout(() => {
           if (isListeningRef.current) {
             createAndStartRecognition();
           }
-        }, 150);
+        }, restartDelay);
       }
     };
 
@@ -811,10 +875,11 @@ export default function useVoiceRecognition({
       recognition.start();
     } catch (e) {
       console.error('[Voice] Start failed:', e);
-      // Retry after a longer delay
+      // MOBILE FIX: Longer retry delay on mobile
+      const retryDelay = isMobile ? 800 : 500;
       setTimeout(() => {
         if (isListeningRef.current) createAndStartRecognition();
-      }, 500);
+      }, retryDelay);
     }
   }, [killRecognition, processIncomingChunk]);
 
@@ -844,36 +909,73 @@ export default function useVoiceRecognition({
 
     setError(null);
 
+    // MOBILE FIX: Detect if we're on mobile for platform-specific handling
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
     // Tiered Browser-Agnostic Mic Request (Failsafe constraints for mobile compatibility)
     try {
-      // Layer 1: Best - Full processing (May fail on some Android/iOS drivers)
       let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true } 
-        });
-      } catch (e) {
-        console.warn('[Voice] Tier 1 mic request failed, dropping autoGainControl...');
-        // Layer 2: Standard - Basic echo/noise suppression
+      
+      if (isIOS) {
+        // iOS SPECIFIC: Use minimal constraints - iOS is very picky
+        console.log('[Voice] iOS detected - using minimal audio constraints');
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            }
+          });
+        } catch (e) {
+          console.warn('[Voice] iOS minimal constraints failed, trying bare audio...');
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } else if (isMobile) {
+        // Android: Start with basic constraints, fall back to raw
+        console.log('[Voice] Android detected - using basic audio constraints');
         try {
           stream = await navigator.mediaDevices.getUserMedia({ 
             audio: { echoCancellation: true, noiseSuppression: true } 
           });
-        } catch (e2) {
-          console.warn('[Voice] Tier 2 mic request failed, requesting raw audio...');
-          // Layer 3: Failsafe - Raw mono audio
+        } catch (e) {
+          console.warn('[Voice] Android basic constraints failed, trying raw audio...');
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } else {
+        // Desktop: Full processing capabilities
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true } 
+          });
+        } catch (e) {
+          console.warn('[Voice] Desktop Tier 1 failed, dropping autoGainControl...');
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ 
+              audio: { echoCancellation: true, noiseSuppression: true } 
+            });
+          } catch (e2) {
+            console.warn('[Voice] Desktop Tier 2 failed, requesting raw audio...');
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          }
         }
       }
       
       streamRef.current = stream;
       setAudioStream(stream);
 
-      // MOBILE FIX: Short delay to let the OS audio hardware settle 
-      // before starting transcription engine (resolves iOS conflict)
-      setTimeout(() => {
-        if (isListeningRef.current) initAudioAnalysis(stream);
-      }, 250);
+      // MOBILE FIX: On iOS, we need to initialize audio analysis IMMEDIATELY after
+      // getting the stream (within the same user gesture context) to avoid suspension
+      if (isIOS) {
+        // Initialize audio analysis right away for iOS
+        initAudioAnalysis(stream);
+      } else {
+        // Other platforms: Short delay to let OS audio hardware settle
+        setTimeout(() => {
+          if (isListeningRef.current) initAudioAnalysis(stream);
+        }, isMobile ? 100 : 250);
+      }
 
     } catch (err) {
       setError(`Mic Access Denied: ${err.message}`);
