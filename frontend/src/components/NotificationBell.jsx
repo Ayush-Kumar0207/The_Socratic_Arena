@@ -550,6 +550,31 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                               </div>
                             )}
 
+                            {/* System Upgrade notification with Upgrade/Dismiss buttons */}
+                            {notif.type === 'system_upgrade' && !notif.metadata?.dismissed && (
+                              <div className="flex items-center gap-2 mt-2.5">
+                                <button
+                                  onClick={() => {
+                                    window.location.reload();
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 font-bold text-[11px] rounded-lg border border-teal-500/30 transition-all"
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                  Upgrade
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleClearOne(notif.id);
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-lg border border-slate-600/50 transition-all"
+                                >
+                                  <X className="h-3 w-3" />
+                                  Dismiss
+                                </button>
+                              </div>
+                            )}
+
                             {/* Status text after responding (Fix #4) */}
                             {notif.type === 'challenge_invite' && !expired && respondedAction && (
                               <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${
