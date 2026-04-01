@@ -475,6 +475,73 @@ app.post('/api/matches/:id/summary', async (req, res) => {
 });
 
 /**
+ * Admin: Broadcast System Notification to All Users
+ * ---------------------------------------------------------------------------
+ * POST /api/admin/broadcast-notification
+ * Body: { title, message, type?, metadata?, adminSecret }
+ * 
+ * Creates a notification for ALL users in the database and triggers
+ * real-time refresh for all connected sockets.
+ */
+app.post('/api/admin/broadcast-notification', async (req, res) => {
+  try {
+    const { title, message, type = 'system_announcement', metadata = {}, adminSecret } = req.body;
+    
+    // Basic admin authentication via secret key
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+    
+    if (!title || !message) {
+      return res.status(400).json({ success: false, message: 'Title and message are required' });
+    }
+    
+    // Fetch all user IDs
+    const { data: users, error: usersError } = await supabase
+      .from('profiles')
+      .select('id');
+    
+    if (usersError) {
+      console.error('[Broadcast] Failed to fetch users:', usersError);
+      return res.status(500).json({ success: false, message: 'Failed to fetch users' });
+    }
+    
+    if (!users || users.length === 0) {
+      return res.status(200).json({ success: true, message: 'No users to notify', count: 0 });
+    }
+    
+    // Create notification for each user
+    const notifications = users.map(user => ({
+      user_id: user.id,
+      type,
+      title,
+      message,
+      metadata: { ...metadata, broadcast: true, broadcast_at: new Date().toISOString() }
+    }));
+    
+    // Bulk insert notifications
+    const { error: insertError } = await supabase
+      .from('notifications')
+      .insert(notifications);
+    
+    if (insertError) {
+      console.error('[Broadcast] Failed to insert notifications:', insertError);
+      return res.status(500).json({ success: false, message: 'Failed to create notifications' });
+    }
+    
+    // Emit real-time event to ALL connected sockets to refresh their notifications
+    io.emit('notification_new');
+    
+    console.log(`[Broadcast] ✅ Sent "${title}" notification to ${users.length} users`);
+    res.json({ success: true, message: `Notification sent to ${users.length} users`, count: users.length });
+    
+  } catch (err) {
+    console.error('[Broadcast] Error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+/**
  * Health Check Route
  * ---------------------------------------------------------------------------
  * A simple route to verify that the backend process is alive.
@@ -2481,9 +2548,70 @@ app.use((err, req, res, next) => {
  */
 const PORT = Number(process.env.PORT) || 5000;
 
+/**
+ * Auto-Broadcast Upgrade Notification on Server Startup
+ * ---------------------------------------------------------------------------
+ * When the server starts (i.e., after a Render deploy), automatically notify
+ * all users that an upgrade is available. This ensures users don't experience
+ * unexpected behavior during version transitions.
+ */
+async function broadcastUpgradeOnStartup() {
+  // Skip in development to avoid spamming during local restarts
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[Auto-Upgrade] Skipping broadcast notification (not in production)');
+    return;
+  }
+
+  try {
+    // Small delay to ensure database connection is ready
+    await sleep(3000);
+
+    const { data: users, error: usersError } = await supabase
+      .from('profiles')
+      .select('id');
+
+    if (usersError || !users || users.length === 0) {
+      console.log('[Auto-Upgrade] No users to notify or fetch failed');
+      return;
+    }
+
+    const notifications = users.map(user => ({
+      user_id: user.id,
+      type: 'system_upgrade',
+      title: 'Upgrade Available',
+      message: 'A newer, more powerful version of Socratic Arena is ready. Please refresh your page to get the latest features.',
+      metadata: { 
+        broadcast: true, 
+        deploy_time: new Date().toISOString(),
+        auto_generated: true
+      }
+    }));
+
+    const { error: insertError } = await supabase
+      .from('notifications')
+      .insert(notifications);
+
+    if (insertError) {
+      console.error('[Auto-Upgrade] Failed to insert notifications:', insertError.message);
+      return;
+    }
+
+    // Emit to all connected sockets to refresh notifications
+    io.emit('notification_new');
+
+    console.log(`[Auto-Upgrade] ✅ Sent upgrade notification to ${users.length} users`);
+  } catch (err) {
+    console.error('[Auto-Upgrade] Error:', err.message);
+  }
+}
+
 try {
   httpServer.listen(PORT, () => {
     console.log(`🚀 Server is listening on http://localhost:${PORT}`);
+    
+    // Trigger auto-broadcast after server is ready
+    broadcastUpgradeOnStartup();
+  });
   });
 } catch (error) {
   console.error('❌ Failed to start server:', error);

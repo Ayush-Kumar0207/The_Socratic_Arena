@@ -275,6 +275,8 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       case 'challenge_accepted': return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
       case 'challenge_declined': return <XCircle className="h-4 w-4 text-rose-400" />;
       case 'challenge_expired': return <Clock className="h-4 w-4 text-amber-400" />;
+      case 'system_announcement': return <Sparkles className="h-4 w-4 text-purple-400" />;
+      case 'system_upgrade': return <RefreshCw className="h-4 w-4 text-teal-400" />;
       default: return <Bell className="h-4 w-4 text-slate-400" />;
     }
   };
@@ -286,6 +288,8 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       case 'challenge_accepted': return 'border-l-emerald-500';
       case 'challenge_declined': return 'border-l-rose-500';
       case 'challenge_expired': return 'border-l-amber-500';
+      case 'system_announcement': return 'border-l-purple-500';
+      case 'system_upgrade': return 'border-l-teal-500';
       default: return 'border-l-slate-600';
     }
   };
@@ -297,6 +301,8 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       case 'challenge_declined': return 'bg-rose-950/90 border-rose-500/50 text-rose-300';
       case 'challenge_sent': return 'bg-indigo-950/90 border-indigo-500/50 text-indigo-300';
       case 'challenge_expired': return 'bg-amber-950/90 border-amber-500/50 text-amber-300';
+      case 'system_announcement': return 'bg-purple-950/90 border-purple-500/50 text-purple-300';
+      case 'system_upgrade': return 'bg-teal-950/90 border-teal-500/50 text-teal-300';
       case 'error': return 'bg-red-950/90 border-red-500/50 text-red-300';
       default: return 'bg-slate-900/90 border-slate-500/50 text-slate-300';
     }
