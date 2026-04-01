@@ -2552,64 +2552,32 @@ const PORT = Number(process.env.PORT) || 5000;
  * Auto-Broadcast Upgrade Notification on Server Startup
  * ---------------------------------------------------------------------------
  * When the server starts (i.e., after a Render deploy), automatically notify
- * all users that an upgrade is available. This ensures users don't experience
- * unexpected behavior during version transitions.
+ * all users that an upgrade is available via real-time socket emission.
+ * This triggers the PWA upgrade notification with Upgrade/Dismiss buttons.
  */
 async function broadcastUpgradeOnStartup() {
-  // Skip in development to avoid spamming during local restarts
   if (process.env.NODE_ENV !== 'production') {
-    console.log('[Auto-Upgrade] Skipping broadcast notification (not in production)');
+    console.log('[Auto-Upgrade] Skipping (not in production)');
     return;
   }
 
-  try {
-    // Small delay to ensure database connection is ready
-    await sleep(3000);
+  // Wait for sockets to connect after deploy
+  await sleep(5000);
 
-    const { data: users, error: usersError } = await supabase
-      .from('profiles')
-      .select('id');
+  // Emit real-time event to trigger PWA upgrade notification on all connected clients
+  io.emit('app_upgrade_available', { 
+    version: new Date().toISOString(),
+    message: 'A newer version of Socratic Arena is ready.'
+  });
 
-    if (usersError || !users || users.length === 0) {
-      console.log('[Auto-Upgrade] No users to notify or fetch failed');
-      return;
-    }
-
-    const notifications = users.map(user => ({
-      user_id: user.id,
-      type: 'system_upgrade',
-      title: 'Upgrade Available',
-      message: 'A newer, more powerful version of Socratic Arena is ready. Please refresh your page to get the latest features.',
-      metadata: { 
-        broadcast: true, 
-        deploy_time: new Date().toISOString(),
-        auto_generated: true
-      }
-    }));
-
-    const { error: insertError } = await supabase
-      .from('notifications')
-      .insert(notifications);
-
-    if (insertError) {
-      console.error('[Auto-Upgrade] Failed to insert notifications:', insertError.message);
-      return;
-    }
-
-    // Emit to all connected sockets to refresh notifications
-    io.emit('notification_new');
-
-    console.log(`[Auto-Upgrade] ✅ Sent upgrade notification to ${users.length} users`);
-  } catch (err) {
-    console.error('[Auto-Upgrade] Error:', err.message);
-  }
+  console.log(`[Auto-Upgrade] ✅ Broadcasted upgrade notification to all connected clients`);
 }
 
 try {
   httpServer.listen(PORT, () => {
     console.log(`🚀 Server is listening on http://localhost:${PORT}`);
     
-    // Trigger auto-broadcast after server is ready
+    // Trigger upgrade broadcast after server is ready
     broadcastUpgradeOnStartup();
   });
 } catch (error) {

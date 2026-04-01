@@ -181,6 +181,13 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       socket.emit('fetch_notifications');
     };
 
+    // Handle server-triggered upgrade notification (from deploy)
+    const handleAppUpgrade = () => {
+      console.log('[NotificationBell] app_upgrade_available received from server');
+      setNeedRefresh(true);
+      setUpgradeStatus('idle');
+    };
+
     socket.on('notifications_list', handleList);
     socket.on('challenge_received', handleChallengeReceived);
     socket.on('challenge_accepted', handleChallengeAccepted);
@@ -191,6 +198,7 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
     socket.on('notification_new', handleNotificationNew);
     socket.on('notifications_marked_read', handleMarkedRead);
     socket.on('match_ended', handleMatchEnded);
+    socket.on('app_upgrade_available', handleAppUpgrade);
 
     return () => {
       socket.off('notifications_list', handleList);
@@ -203,8 +211,9 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       socket.off('notification_new', handleNotificationNew);
       socket.off('notifications_marked_read', handleMarkedRead);
       socket.off('match_ended', handleMatchEnded);
+      socket.off('app_upgrade_available', handleAppUpgrade);
     };
-  }, [socket, user, navigate]);
+  }, [socket, user, navigate, setNeedRefresh]);
 
   // --- Close panel on outside click ---
   useEffect(() => {
