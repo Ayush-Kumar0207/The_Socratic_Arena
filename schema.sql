@@ -70,6 +70,8 @@ create table public.matches (
   audience_votes_defender integer null default 0,
   highlights jsonb null,
   winner_id uuid null,
+  elo_change_critic integer null default 0,
+  elo_change_defender integer null default 0,
   constraint matches_pkey primary key (id),
   constraint matches_critic_id_fkey foreign KEY (critic_id) references profiles (id),
   constraint matches_defender_id_fkey foreign KEY (defender_id) references profiles (id),

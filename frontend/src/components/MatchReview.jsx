@@ -899,22 +899,139 @@ const MatchReview = () => {
           ) : null}
         </div>
 
-        {/* Winner Celebration */}
+        {/* Winner Celebration - Premium Design */}
         {match.status === 'completed' && (
-          <div className={`p-6 border-t ${winner === 'Critic' ? 'bg-linear-to-r from-rose-900/40 to-black border-rose-500/30' : winner === 'Defender' ? 'bg-linear-to-r from-indigo-900/40 to-black border-indigo-500/30' : 'bg-linear-to-r from-yellow-600/20 to-orange-600/20 border-yellow-500/30'}`}>
-            <div className="max-w-4xl mx-auto text-center">
-              <div className="text-6xl mb-4">🏆</div>
-              <h2 className={`text-4xl font-extrabold mb-2 tracking-wide ${winner === 'Critic' ? 'text-rose-400' : winner === 'Defender' ? 'text-indigo-400' : 'text-yellow-300'}`}>
-                {winner === 'Tie' ? 'MATCH TIED!' : `🏅 ${winner.toUpperCase()} WINS!`}
-              </h2>
-              <p className={`text-xl ${winner === 'Critic' ? 'text-rose-200' : winner === 'Defender' ? 'text-indigo-200' : 'text-yellow-200'}`}>
-                {winner === 'Tie' ? `Both sides tied with ${final_score_critic} points!` : `Dominating performance! Final Score: ${winner === 'Critic' ? final_score_critic : final_score_defender}`}
-              </p>
-              <div className="mt-6">
-                <span className={`inline-flex items-center gap-2 px-6 py-3 rounded-full font-bold shadow-lg ${winner === 'Critic' ? 'bg-rose-600/20 border border-rose-500/30 text-rose-300' : winner === 'Defender' ? 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-300' : 'bg-yellow-600/20 border border-yellow-500/30 text-yellow-300'}`}>
-                  <Trophy className="h-6 w-6" />
-                  100 Elo Points Awarded to Leaderboard
-                </span>
+          <div className="relative overflow-hidden">
+            {/* Animated Background Gradient */}
+            <div className={`absolute inset-0 ${
+              winner === 'Critic' 
+                ? 'bg-gradient-to-br from-rose-950/90 via-rose-900/50 to-slate-950' 
+                : winner === 'Defender' 
+                  ? 'bg-gradient-to-br from-indigo-950/90 via-indigo-900/50 to-slate-950' 
+                  : 'bg-gradient-to-br from-amber-950/90 via-yellow-900/50 to-slate-950'
+            }`} />
+            
+            {/* Subtle Animated Glow Orbs */}
+            <div className={`absolute top-0 left-1/4 w-96 h-96 rounded-full blur-3xl animate-pulse ${
+              winner === 'Critic' ? 'bg-rose-500/20' : winner === 'Defender' ? 'bg-indigo-500/20' : 'bg-amber-500/20'
+            }`} style={{ animationDuration: '3s' }} />
+            <div className={`absolute bottom-0 right-1/4 w-80 h-80 rounded-full blur-3xl animate-pulse ${
+              winner === 'Critic' ? 'bg-pink-500/15' : winner === 'Defender' ? 'bg-cyan-500/15' : 'bg-orange-500/15'
+            }`} style={{ animationDuration: '4s', animationDelay: '1s' }} />
+            
+            <div className="relative z-10 py-12 px-6">
+              <div className="max-w-2xl mx-auto text-center">
+                
+                {/* Premium Trophy SVG */}
+                <div className="relative inline-block mb-6">
+                  {/* Outer Glow Ring */}
+                  <div className={`absolute inset-0 rounded-full blur-xl animate-pulse ${
+                    winner === 'Critic' ? 'bg-rose-400/40' : winner === 'Defender' ? 'bg-indigo-400/40' : 'bg-amber-400/40'
+                  }`} style={{ transform: 'scale(1.5)', animationDuration: '2s' }} />
+                  
+                  {/* Trophy Icon Container */}
+                  <div className={`relative w-24 h-24 rounded-full flex items-center justify-center ${
+                    winner === 'Tie' 
+                      ? 'bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500' 
+                      : winner === 'Critic' 
+                        ? 'bg-gradient-to-br from-rose-400 via-pink-500 to-rose-600' 
+                        : 'bg-gradient-to-br from-indigo-400 via-blue-500 to-indigo-600'
+                  } shadow-2xl`}>
+                    <Trophy className={`w-12 h-12 ${winner === 'Tie' ? 'text-amber-900' : 'text-white'} drop-shadow-lg`} />
+                  </div>
+                  
+                  {/* Sparkle Decorations */}
+                  <Sparkles className={`absolute -top-2 -right-2 w-6 h-6 animate-bounce ${
+                    winner === 'Critic' ? 'text-rose-300' : winner === 'Defender' ? 'text-indigo-300' : 'text-amber-300'
+                  }`} style={{ animationDuration: '1.5s' }} />
+                  <Sparkles className={`absolute -bottom-1 -left-3 w-5 h-5 animate-bounce ${
+                    winner === 'Critic' ? 'text-pink-300' : winner === 'Defender' ? 'text-cyan-300' : 'text-yellow-300'
+                  }`} style={{ animationDuration: '2s', animationDelay: '0.5s' }} />
+                </div>
+                
+                {/* Winner Title */}
+                <h2 className={`text-4xl md:text-5xl font-black mb-3 tracking-tight ${
+                  winner === 'Critic' 
+                    ? 'bg-gradient-to-r from-rose-300 via-pink-200 to-rose-300 bg-clip-text text-transparent' 
+                    : winner === 'Defender' 
+                      ? 'bg-gradient-to-r from-indigo-300 via-cyan-200 to-indigo-300 bg-clip-text text-transparent' 
+                      : 'bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-300 bg-clip-text text-transparent'
+                }`}>
+                  {winner === 'Tie' ? 'MATCH TIED' : `${winner.toUpperCase()} WINS`}
+                </h2>
+                
+                {/* Subtitle */}
+                <p className={`text-lg md:text-xl font-medium mb-8 ${
+                  winner === 'Critic' ? 'text-rose-200/80' : winner === 'Defender' ? 'text-indigo-200/80' : 'text-amber-200/80'
+                }`}>
+                  {winner === 'Tie' 
+                    ? `An evenly matched debate • ${final_score_critic} points each` 
+                    : `Decisive victory with ${winner === 'Critic' ? final_score_critic : final_score_defender} points`
+                  }
+                </p>
+                
+                {/* ELO Change Display - Glassmorphism Card */}
+                <div className={`inline-flex items-center gap-6 px-8 py-5 rounded-2xl backdrop-blur-xl border ${
+                  winner === 'Critic' 
+                    ? 'bg-rose-500/10 border-rose-400/30 shadow-rose-500/20' 
+                    : winner === 'Defender' 
+                      ? 'bg-indigo-500/10 border-indigo-400/30 shadow-indigo-500/20' 
+                      : 'bg-amber-500/10 border-amber-400/30 shadow-amber-500/20'
+                } shadow-2xl`}>
+                  
+                  {/* Critic ELO */}
+                  <div className="text-center">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Critic</p>
+                    <p className={`text-2xl font-bold ${
+                      (match.elo_change_critic || 0) > 0 
+                        ? 'text-emerald-400' 
+                        : (match.elo_change_critic || 0) < 0 
+                          ? 'text-red-400' 
+                          : 'text-slate-300'
+                    }`}>
+                      {(match.elo_change_critic || 0) > 0 ? '+' : ''}{match.elo_change_critic || 0}
+                      <span className="text-sm font-medium text-slate-400 ml-1">ELO</span>
+                    </p>
+                  </div>
+                  
+                  {/* Divider */}
+                  <div className={`w-px h-12 ${
+                    winner === 'Critic' ? 'bg-rose-400/30' : winner === 'Defender' ? 'bg-indigo-400/30' : 'bg-amber-400/30'
+                  }`} />
+                  
+                  {/* Defender ELO */}
+                  <div className="text-center">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Defender</p>
+                    <p className={`text-2xl font-bold ${
+                      (match.elo_change_defender || 0) > 0 
+                        ? 'text-emerald-400' 
+                        : (match.elo_change_defender || 0) < 0 
+                          ? 'text-red-400' 
+                          : 'text-slate-300'
+                    }`}>
+                      {(match.elo_change_defender || 0) > 0 ? '+' : ''}{match.elo_change_defender || 0}
+                      <span className="text-sm font-medium text-slate-400 ml-1">ELO</span>
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Winner Badge - Only show if not a tie */}
+                {winner !== 'Tie' && (
+                  <div className="mt-6">
+                    <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${
+                      winner === 'Critic' 
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-400/30' 
+                        : 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/30'
+                    }`}>
+                      <Target className="w-4 h-4" />
+                      {winner === 'Critic' 
+                        ? `Critic dominated by ${final_score_critic - final_score_defender} points` 
+                        : `Defender prevailed by ${final_score_defender - final_score_critic} points`
+                      }
+                    </span>
+                  </div>
+                )}
+                
               </div>
             </div>
           </div>

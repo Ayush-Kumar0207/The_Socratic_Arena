@@ -285,9 +285,20 @@ async function resolveMatch(matchId) {
       if (sDefender === 1 && (defenderVotes / totalVotes) > 0.9) newDefenderRating += 5;
     }
 
-    console.log(`[Timer Resolution] Match ${matchId} winner: ${winnerId}. Elo: Critic ${rCritic}->${newCriticRating}, Defender ${rDefender}->${newDefenderRating}`);
+    // Calculate ELO changes for display
+    const eloChangeCritic = newCriticRating - rCritic;
+    const eloChangeDefender = newDefenderRating - rDefender;
 
-    // 4. Update Elo ratings (only after match is safely marked completed)
+    console.log(`[Timer Resolution] Match ${matchId} winner: ${winnerId}. Elo: Critic ${rCritic}->${newCriticRating} (${eloChangeCritic > 0 ? '+' : ''}${eloChangeCritic}), Defender ${rDefender}->${newDefenderRating} (${eloChangeDefender > 0 ? '+' : ''}${eloChangeDefender})`);
+
+    // 4. Store ELO changes in the match record
+    const { error: eloStoreError } = await supabase
+      .from('matches')
+      .update({ elo_change_critic: eloChangeCritic, elo_change_defender: eloChangeDefender })
+      .eq('id', matchId);
+    if (eloStoreError) console.warn(`[Timer Resolution] Failed to store ELO changes:`, eloStoreError.message);
+
+    // 5. Update Elo ratings in profiles (only after match is safely marked completed)
     if (latestMatch.critic_id) {
       const { error: e1 } = await supabase.from('profiles').update({ elo_rating: newCriticRating }).eq('id', latestMatch.critic_id);
       if (e1) console.error(`[Timer Resolution] Failed to update critic Elo:`, e1.message);
@@ -736,9 +747,15 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     }
 
     // Try to update with winner_id, but fallback if the column is missing in the DB
+    // Also store ELO changes for display on the match review page
+    const eloChangeLeaver = newLeaverRating - rLeaver;
+    const eloChangeStayer = newStayerRating - rStayer;
+    
     const matchUpdateData = {
       status: 'abandoned',
-      transcript: savedTranscript
+      transcript: savedTranscript,
+      elo_change_critic: leaverRole === 'critic' ? eloChangeLeaver : eloChangeStayer,
+      elo_change_defender: leaverRole === 'defender' ? eloChangeLeaver : eloChangeStayer
     };
     if (stayerProfile.id) matchUpdateData.winner_id = stayerId;
 
