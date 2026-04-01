@@ -22,6 +22,12 @@ const Lobby = ({ socket, user }) => {
   const [privateError, setPrivateError] = useState(null);
   const [isSocketConnected, setIsSocketConnected] = useState(socket?.connected || false);
 
+  // Challenge mode state
+  const incomingChallengeId = location.state?.challengeId;
+  const [challengeData, setChallengeData] = useState(null);
+  const [challengeExpiry, setChallengeExpiry] = useState(null);
+  const [challengeTimeLeft, setChallengeTimeLeft] = useState(null);
+
   // Check if we arrived via "Join Arena" with an arenaCode in route state
   const incomingArenaCode = location.state?.arenaCode;
   
@@ -140,9 +146,57 @@ const Lobby = ({ socket, user }) => {
     socket.on('private_arena_stance_update', handleStanceUpdate);
     socket.on('private_arena_error', handlePrivateError);
 
-    // Initial attempt if connected
+    // --- Challenge mode listeners ---
+    const handleChallengeState = ({ challenge, myRole: role }) => {
+      setChallengeData(challenge);
+      setArenaCode(challenge.arena_code);
+      setChallengeExpiry(new Date(challenge.expires_at));
+      setMyRole(role === 'challenger' ? 'creator' : 'joiner');
+      myRoleRef.current = role === 'challenger' ? 'creator' : 'joiner';
+
+      // Check if opponent is already in
+      const opponentIn = role === 'challenger' ? challenge.challenged_in_arena : challenge.challenger_in_arena;
+      if (opponentIn) {
+        setIsPaired(true);
+        setOpponentId(role === 'challenger' ? challenge.challenged_id : challenge.challenger_id);
+      }
+    };
+
+    const handleChallengeOpponentJoined = ({ challengeId, userId: joinedUserId, joinerName }) => {
+      setIsPaired(true);
+      setOpponentId(joinedUserId);
+    };
+
+    const handleChallengeStanceUpdate = ({ challengerStance, challengedStance }) => {
+      const myR = myRoleRef.current;
+      if (myR === 'creator') setOpponentStance(challengedStance);
+      else setOpponentStance(challengerStance);
+    };
+
+    const handleChallengeReady = (data) => {
+      const assignedRole = data.roles ? data.roles[socket.id] : null;
+      navigate(`/arena/${data.roomId}`, { state: { ...data, assignedRole, stances } });
+    };
+
+    const handleChallengeExpired = () => {
+      setPrivateError('Challenge has expired (10 min limit).');
+      setTimeout(() => navigate('/dashboard'), 3000);
+    };
+
+    socket.on('challenge_arena_state', handleChallengeState);
+    socket.on('challenge_opponent_joined', handleChallengeOpponentJoined);
+    socket.on('challenge_stance_update', handleChallengeStanceUpdate);
+    socket.on('challenge_arena_ready', handleChallengeReady);
+    socket.on('challenge_expired', handleChallengeExpired);
+
+    // Initial attempt if connected and Auto-join logic based on how we arrived
     if (socket.connected) {
-      handleStatusChange();
+      if (incomingChallengeId) {
+        // Challenge mode: join the challenge arena
+        socket.emit('join_challenge_arena', { challengeId: incomingChallengeId });
+      } else {
+        handleStatusChange();
+      }
     } else {
       // If not connected, it might be Render cold start — wait for 'connect' event
       console.log("[Lobby] Socket not connected, waiting for backend to wake up...");
@@ -157,22 +211,60 @@ const Lobby = ({ socket, user }) => {
       socket.off('private_arena_joined', handleArenaJoined);
       socket.off('private_arena_stance_update', handleStanceUpdate);
       socket.off('private_arena_error', handlePrivateError);
+      socket.off('challenge_arena_state', handleChallengeState);
+      socket.off('challenge_opponent_joined', handleChallengeOpponentJoined);
+      socket.off('challenge_stance_update', handleChallengeStanceUpdate);
+      socket.off('challenge_arena_ready', handleChallengeReady);
+      socket.off('challenge_expired', handleChallengeExpired);
     };
   }, [socket, navigate, incomingArenaCode, topic.id, topic.title]);
 
   // Broadcast stance changes when paired
   useEffect(() => {
-    if (!socket || !isPaired || !arenaId || !myRole) return;
-    socket.emit('private_arena_set_stance', {
-      arenaId,
-      stance: selectedRole,
-      role: myRole
-    });
-  }, [selectedRole, isPaired, arenaId, myRole, socket]);
+    if (!socket || !isPaired) return;
+
+    if (incomingChallengeId && challengeData) {
+      // Challenge mode stance update
+      socket.emit('set_challenge_stance', {
+        challengeId: incomingChallengeId,
+        stance: selectedRole
+      });
+    } else if (arenaId && myRole) {
+      socket.emit('private_arena_set_stance', {
+        arenaId,
+        stance: selectedRole,
+        role: myRole
+      });
+    }
+  }, [selectedRole, isPaired, arenaId, myRole, socket, incomingChallengeId, challengeData]);
+
+  // Challenge countdown timer
+  useEffect(() => {
+    if (!challengeExpiry) return;
+    const tick = () => {
+      const diff = challengeExpiry.getTime() - Date.now();
+      if (diff <= 0) {
+        setChallengeTimeLeft('Expired');
+        return;
+      }
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setChallengeTimeLeft(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [challengeExpiry]);
 
   const handleStartMatchmaking = () => {
     if (!socket) {
       window.alert('Socket not connected');
+      return;
+    }
+
+    if (incomingChallengeId) {
+      // Challenge mode — already handled by join_challenge_arena, both users just need to be in arena
+      // The backend auto-starts when both are present
       return;
     }
 
@@ -265,7 +357,20 @@ const Lobby = ({ socket, user }) => {
             </p>
           </header>
 
-          {/* Connection Status Banner (for Cold Starts) Removed as per user request */}
+          {/* Challenge Mode — Countdown Timer */}
+          {incomingChallengeId && challengeTimeLeft && (
+            <div className="w-full max-w-md mb-4">
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-amber-400 animate-pulse" />
+                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">Challenge Expires In</span>
+                </div>
+                <span className={`font-mono font-black text-lg ${challengeTimeLeft === 'Expired' ? 'text-rose-400' : 'text-amber-300'}`}>
+                  {challengeTimeLeft}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Arena Code Badge */}
           {arenaCode && !isPaired && (

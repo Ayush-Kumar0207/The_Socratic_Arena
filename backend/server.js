@@ -381,9 +381,10 @@ setInterval(async () => {
 
         // Real-time push to online users
         [ch.challenger_id, ch.challenged_id].forEach(uid => {
-          const sockets = userSocketMap.get(uid);
-          if (sockets) {
-            sockets.forEach(sid => io.to(sid).emit('notification_new', { type: 'challenge_expired', challenge_id: ch.id }));
+          const sid = userSocketMap.get(uid);
+          if (sid) {
+            const s = io.sockets.sockets.get(sid);
+            if (s) s.emit('notification_new', { type: 'challenge_expired', challenge_id: ch.id });
           }
         });
       }
@@ -903,6 +904,63 @@ const checkRateLimit = (userId, endpoint, maxRequests, windowMs) => {
 };
 
 /**
+ * Challenge System State
+ * ---------------------------------------------------------------------------
+ * challengeTimers: Maps challengeId -> setTimeout ref for 10-min expiry
+ * (userSocketMap is declared above at the global state section)
+ */
+const challengeTimers = new Map();
+
+/**
+ * Generate unique 8-char arena code (e.g. "A3K7-X9B2")
+ */
+const generateArenaCode = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    if (i === 4) code += '-';
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+};
+
+/**
+ * Challenge Expiry Cron — runs every 30s to expire stale challenges
+ */
+setInterval(async () => {
+  try {
+    const { data: expired, error } = await supabase
+      .from('challenges')
+      .select('id, challenger_id, challenged_id')
+      .in('status', ['pending', 'accepted'])
+      .lt('expires_at', new Date().toISOString());
+
+    if (error || !expired || expired.length === 0) return;
+
+    for (const ch of expired) {
+      await supabase.from('challenges').update({ status: 'expired' }).eq('id', ch.id);
+
+      // Notify both users
+      [ch.challenger_id, ch.challenged_id].forEach(uid => {
+        const sid = userSocketMap.get(uid);
+        if (sid) {
+          const s = io.sockets.sockets.get(sid);
+          if (s) s.emit('challenge_expired', { challengeId: ch.id });
+        }
+      });
+
+      if (challengeTimers.has(ch.id)) {
+        clearTimeout(challengeTimers.get(ch.id));
+        challengeTimers.delete(ch.id);
+      }
+      console.log(`[Challenge Cron] Expired challenge ${ch.id}`);
+    }
+  } catch (err) {
+    console.error('[Challenge Cron] Error:', err);
+  }
+}, 30000);
+
+/**
  * Socket.io Connection Lifecycle - Multiplayer Matchmaking
  * ---------------------------------------------------------------------------
  * Handles 1v1 Blitz Debating matchmaking, room management, and turn synchronization.
@@ -933,14 +991,10 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   console.log(`[socket] Client connected: ${socket.id}`);
 
-  // --- Register in userSocketMap ---
-  const connectedUserId = socket.verifiedUserId;
-  if (connectedUserId) {
-    if (!userSocketMap.has(connectedUserId)) {
-      userSocketMap.set(connectedUserId, new Set());
-    }
-    userSocketMap.get(connectedUserId).add(socket.id);
-    console.log(`[userSocketMap] Registered ${socket.id} for user ${connectedUserId} (${userSocketMap.get(connectedUserId).size} active)`);
+  // Register user in socket map for targeted notifications
+  if (socket.verifiedUserId) {
+    userSocketMap.set(socket.verifiedUserId, socket.id);
+    console.log(`[userSocketMap] Registered ${socket.id} for user ${socket.verifiedUserId}`);
   }
 
   // Ready event for connection verification
@@ -1999,6 +2053,403 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     }
   });
 
+  // =========================================================================
+  // CHALLENGE SYSTEM — Socket Handlers
+  // =========================================================================
+
+  /**
+   * Send Challenge: User A challenges User B
+   */
+  socket.on('send_challenge', async ({ challengedId, topicId, topicTitle }) => {
+    const challengerId = socket.verifiedUserId;
+    if (!challengerId || !challengedId || !topicTitle) {
+      socket.emit('challenge_error', { message: 'Missing required fields.' });
+      return;
+    }
+    if (challengerId === challengedId) {
+      socket.emit('challenge_error', { message: 'You cannot challenge yourself.' });
+      return;
+    }
+
+    try {
+      const arenaCode = generateArenaCode();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+      const { data: challenge, error } = await supabase.from('challenges').insert({
+        challenger_id: challengerId,
+        challenged_id: challengedId,
+        topic_id: topicId || null,
+        topic_title: topicTitle,
+        arena_code: arenaCode,
+        status: 'pending',
+        expires_at: expiresAt
+      }).select().single();
+
+      if (error) throw error;
+
+      // Fetch challenger profile for notification display
+      const { data: challengerProfile } = await supabase.from('profiles').select('username, elo_rating').eq('id', challengerId).single();
+      const challengerName = challengerProfile?.username || 'A debater';
+
+      // Create persistent notification for User B
+      await supabase.from('notifications').insert({
+        user_id: challengedId,
+        type: 'challenge_received',
+        title: 'Challenge Received!',
+        message: `${challengerName} has challenged you to a debate on "${topicTitle}"`,
+        metadata: { challengeId: challenge.id, challengerId, challengerName, topicTitle, arenaCode }
+      });
+
+      // Confirm to User A
+      socket.emit('challenge_sent', { challenge });
+
+      // Real-time push to User B if online
+      const targetSocketId = userSocketMap.get(challengedId);
+      if (targetSocketId) {
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket) {
+          targetSocket.emit('challenge_received', {
+            challengeId: challenge.id,
+            challengerId,
+            challengerName,
+            topicTitle,
+            arenaCode,
+            expiresAt
+          });
+        }
+      }
+
+      // Set 10-minute expiry timer
+      const timer = setTimeout(async () => {
+        const { data: ch } = await supabase.from('challenges').select('status').eq('id', challenge.id).single();
+        if (ch && (ch.status === 'pending' || ch.status === 'accepted')) {
+          await supabase.from('challenges').update({ status: 'expired' }).eq('id', challenge.id);
+          [challengerId, challengedId].forEach(uid => {
+            const sid = userSocketMap.get(uid);
+            if (sid) {
+              const s = io.sockets.sockets.get(sid);
+              if (s) s.emit('challenge_expired', { challengeId: challenge.id });
+            }
+          });
+        }
+        challengeTimers.delete(challenge.id);
+      }, 10 * 60 * 1000);
+      challengeTimers.set(challenge.id, timer);
+
+      console.log(`[Challenge] ${challengerName} challenged ${challengedId} on "${topicTitle}" (${challenge.id})`);
+    } catch (err) {
+      console.error('[Challenge] Error sending challenge:', err);
+      socket.emit('challenge_error', { message: 'Failed to send challenge.' });
+    }
+  });
+
+  /**
+   * Accept Challenge: User B accepts
+   */
+  socket.on('accept_challenge', async ({ challengeId }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data: challenge, error } = await supabase.from('challenges')
+        .select('*').eq('id', challengeId).single();
+
+      if (error || !challenge) {
+        socket.emit('challenge_error', { message: 'Challenge not found.' });
+        return;
+      }
+      if (challenge.challenged_id !== userId) {
+        socket.emit('challenge_error', { message: 'This challenge is not for you.' });
+        return;
+      }
+      if (challenge.status !== 'pending') {
+        socket.emit('challenge_error', { message: `Challenge is already ${challenge.status}.` });
+        return;
+      }
+      if (new Date(challenge.expires_at) < new Date()) {
+        await supabase.from('challenges').update({ status: 'expired' }).eq('id', challengeId);
+        socket.emit('challenge_error', { message: 'Challenge has expired.' });
+        return;
+      }
+
+      await supabase.from('challenges').update({ status: 'accepted' }).eq('id', challengeId);
+
+      // Fetch acceptor's profile
+      const { data: acceptorProfile } = await supabase.from('profiles').select('username').eq('id', userId).single();
+      const acceptorName = acceptorProfile?.username || 'Your opponent';
+
+      // Notify User A
+      await supabase.from('notifications').insert({
+        user_id: challenge.challenger_id,
+        type: 'challenge_accepted',
+        title: 'Challenge Accepted!',
+        message: `${acceptorName} accepted your challenge and is heading to the arena!`,
+        metadata: { challengeId, topicTitle: challenge.topic_title }
+      });
+
+      socket.emit('challenge_accepted_ack', { challenge: { ...challenge, status: 'accepted' } });
+
+      const challengerSocketId = userSocketMap.get(challenge.challenger_id);
+      if (challengerSocketId) {
+        const s = io.sockets.sockets.get(challengerSocketId);
+        if (s) {
+          s.emit('challenge_accepted', {
+            challengeId,
+            acceptorName,
+            topicTitle: challenge.topic_title
+          });
+        }
+      }
+
+      console.log(`[Challenge] ${acceptorName} accepted challenge ${challengeId}`);
+    } catch (err) {
+      console.error('[Challenge] Error accepting:', err);
+      socket.emit('challenge_error', { message: 'Failed to accept challenge.' });
+    }
+  });
+
+  /**
+   * Join Challenge Arena: Either user enters the arena waiting room
+   */
+  socket.on('join_challenge_arena', async ({ challengeId }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data: challenge, error } = await supabase.from('challenges')
+        .select('*').eq('id', challengeId).single();
+
+      if (error || !challenge || challenge.status === 'expired') {
+        socket.emit('challenge_error', { message: 'Challenge not found or expired.' });
+        return;
+      }
+
+      const isChallenger = challenge.challenger_id === userId;
+      const isChallenged = challenge.challenged_id === userId;
+      if (!isChallenger && !isChallenged) {
+        socket.emit('challenge_error', { message: 'You are not part of this challenge.' });
+        return;
+      }
+
+      // Mark this user as in the arena
+      const updateField = isChallenger ? 'challenger_in_arena' : 'challenged_in_arena';
+      await supabase.from('challenges').update({ [updateField]: true }).eq('id', challengeId);
+
+      // Join the socket room for this challenge
+      socket.join(`challenge_${challengeId}`);
+
+      // Re-fetch to check if both are in
+      const { data: updated } = await supabase.from('challenges')
+        .select('*').eq('id', challengeId).single();
+
+      if (!updated) return;
+
+      const otherUserId = isChallenger ? challenge.challenged_id : challenge.challenger_id;
+
+      // Notify the other user (only if they're NOT already in the arena)
+      const otherInArena = isChallenger ? updated.challenged_in_arena : updated.challenger_in_arena;
+      if (!otherInArena) {
+        const { data: joinerProfile } = await supabase.from('profiles').select('username').eq('id', userId).single();
+        const joinerName = joinerProfile?.username || 'Your opponent';
+
+        await supabase.from('notifications').insert({
+          user_id: otherUserId,
+          type: 'user_joined_arena',
+          title: 'Opponent in Arena!',
+          message: `${joinerName} has joined the arena and is waiting for you!`,
+          metadata: { challengeId }
+        });
+
+        const otherSocketId = userSocketMap.get(otherUserId);
+        if (otherSocketId) {
+          const s = io.sockets.sockets.get(otherSocketId);
+          if (s) s.emit('challenge_opponent_joined', { challengeId, userId, joinerName });
+        }
+      }
+
+      socket.emit('challenge_arena_state', {
+        challenge: updated,
+        myRole: isChallenger ? 'challenger' : 'challenged'
+      });
+
+      // Both in arena? Start the match!
+      if (updated.challenger_in_arena && updated.challenged_in_arena) {
+        // Assign roles based on stances
+        let critic, defender;
+        const p1 = { userId: updated.challenger_id, stance: updated.challenger_stance || 'Random' };
+        const p2 = { userId: updated.challenged_id, stance: updated.challenged_stance || 'Random' };
+
+        if (p1.stance === 'Critic') { critic = p1; defender = p2; }
+        else if (p2.stance === 'Critic') { critic = p2; defender = p1; }
+        else if (p1.stance === 'Defender') { critic = p2; defender = p1; }
+        else if (p2.stance === 'Defender') { critic = p1; defender = p2; }
+        else { // Both random
+          if (Math.random() > 0.5) { critic = p1; defender = p2; }
+          else { critic = p2; defender = p1; }
+        }
+
+        // Create match in DB
+        let roomId;
+        try {
+          const { data: matchData, error: matchErr } = await supabase.from('matches').insert({
+            topic: updated.topic_title,
+            topic_title: updated.topic_title,
+            status: 'active',
+            critic_id: critic.userId,
+            defender_id: defender.userId
+          }).select().single();
+          if (matchErr) throw matchErr;
+          roomId = matchData.id;
+        } catch (matchErr) {
+          console.error('[Challenge] Match creation error:', matchErr);
+          roomId = `room_${Date.now()}`;
+        }
+
+        await supabase.from('challenges').update({ status: 'active', match_id: roomId }).eq('id', challengeId);
+
+        // Clear expiry timer
+        if (challengeTimers.has(challengeId)) {
+          clearTimeout(challengeTimers.get(challengeId));
+          challengeTimers.delete(challengeId);
+        }
+
+        // Get socket IDs for both players
+        const criticSocketId = userSocketMap.get(critic.userId);
+        const defenderSocketId = userSocketMap.get(defender.userId);
+
+        // Join room
+        if (criticSocketId) io.in(criticSocketId).socketsJoin(roomId);
+        if (defenderSocketId) io.in(defenderSocketId).socketsJoin(roomId);
+
+        activeRooms[roomId] = {
+          players: { critic: criticSocketId, defender: defenderSocketId },
+          critic_id: critic.userId,
+          defender_id: defender.userId,
+          topic: updated.topic_title,
+          activeSpeaker: 'Critic',
+          criticTime: 300,
+          defenderTime: 300,
+          transcript: [],
+          status: 'active',
+          startTime: Date.now(),
+          lifelines: {
+            [critic.userId]: 1,
+            [defender.userId]: 1
+          }
+        };
+
+        // Emit match_found to both players via the challenge room
+        io.to(`challenge_${challengeId}`).emit('challenge_arena_ready', {
+          roomId,
+          topic: updated.topic_title,
+          roles: {
+            [criticSocketId]: 'Critic',
+            [defenderSocketId]: 'Defender'
+          }
+        });
+
+        startRoomTimer(roomId);
+        io.to(roomId).emit('time_sync', { criticTime: 300, defenderTime: 300, activeSpeaker: 'Critic' });
+
+        // Tag sockets
+        [criticSocketId, defenderSocketId].forEach(sid => {
+          const s = io.sockets.sockets.get(sid);
+          if (s) s.currentMatchId = roomId;
+        });
+
+        console.log(`[Challenge] ⚔️ Challenge ${challengeId} started as match ${roomId}!`);
+      }
+    } catch (err) {
+      console.error('[Challenge] Error joining arena:', err);
+      socket.emit('challenge_error', { message: 'Failed to join challenge arena.' });
+    }
+  });
+
+  /**
+   * Set Challenge Stance
+   */
+  socket.on('set_challenge_stance', async ({ challengeId, stance }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data: challenge } = await supabase.from('challenges')
+        .select('*').eq('id', challengeId).single();
+      if (!challenge) return;
+
+      const isChallenger = challenge.challenger_id === userId;
+      const field = isChallenger ? 'challenger_stance' : 'challenged_stance';
+      await supabase.from('challenges').update({ [field]: stance }).eq('id', challengeId);
+
+      // Broadcast to the challenge room
+      io.to(`challenge_${challengeId}`).emit('challenge_stance_update', {
+        challengeId,
+        challengerStance: isChallenger ? stance : challenge.challenger_stance,
+        challengedStance: isChallenger ? challenge.challenged_stance : stance
+      });
+    } catch (err) {
+      console.error('[Challenge] Stance update error:', err);
+    }
+  });
+
+  /**
+   * Cancel Challenge (by challenger only)
+   */
+  socket.on('cancel_challenge', async ({ challengeId }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data: ch } = await supabase.from('challenges')
+        .select('*').eq('id', challengeId).single();
+      if (!ch || ch.challenger_id !== userId) return;
+      if (ch.status === 'active' || ch.status === 'expired') return;
+
+      await supabase.from('challenges').update({ status: 'expired' }).eq('id', challengeId);
+
+      if (challengeTimers.has(challengeId)) {
+        clearTimeout(challengeTimers.get(challengeId));
+        challengeTimers.delete(challengeId);
+      }
+
+      io.to(`challenge_${challengeId}`).emit('challenge_expired', { challengeId });
+      console.log(`[Challenge] Cancelled by challenger: ${challengeId}`);
+    } catch (err) {
+      console.error('[Challenge] Cancel error:', err);
+    }
+  });
+
+  /**
+   * Fetch Notifications for current user
+   */
+  socket.on('fetch_notifications', async () => {
+    const userId = socket.verifiedUserId;
+    try {
+      const { data, error } = await supabase.from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      socket.emit('notifications_list', { notifications: data || [] });
+    } catch (err) {
+      console.error('[Notifications] Fetch error:', err);
+      socket.emit('notifications_list', { notifications: [] });
+    }
+  });
+
+  /**
+   * Mark Notifications as Read
+   */
+  socket.on('mark_notifications_read', async ({ notificationIds }) => {
+    const userId = socket.verifiedUserId;
+    try {
+      if (notificationIds && notificationIds.length > 0) {
+        await supabase.from('notifications').update({ is_read: true })
+          .in('id', notificationIds).eq('user_id', userId);
+      } else {
+        // Mark all as read
+        await supabase.from('notifications').update({ is_read: true })
+          .eq('user_id', userId).eq('is_read', false);
+      }
+    } catch (err) {
+      console.error('[Notifications] Mark read error:', err);
+    }
+  });
+
   /**
    * Handle disconnection
    */
@@ -2500,14 +2951,10 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
   socket.on('disconnect', async (reason) => {
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
 
-    // --- Remove from userSocketMap ---
-    const dcUserId = socket.verifiedUserId;
-    if (dcUserId && userSocketMap.has(dcUserId)) {
-      userSocketMap.get(dcUserId).delete(socket.id);
-      if (userSocketMap.get(dcUserId).size === 0) {
-        userSocketMap.delete(dcUserId);
-      }
-      console.log(`[userSocketMap] Unregistered ${socket.id} for user ${dcUserId} (${userSocketMap.get(dcUserId)?.size || 0} remaining)`);
+    // Remove user from socket map
+    if (socket.verifiedUserId) {
+      userSocketMap.delete(socket.verifiedUserId);
+      console.log(`[userSocketMap] Unregistered ${socket.id} for user ${socket.verifiedUserId}`);
     }
 
     // Remove from any topic waiting queue

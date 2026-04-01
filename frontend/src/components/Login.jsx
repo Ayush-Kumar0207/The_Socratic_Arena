@@ -52,13 +52,18 @@ const Login = ({ initialView, onResetComplete }) => {
 
     try {
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        // Sign up
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { username: username }
+          }
+        });
+
         if (error) throw error;
 
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert([{ id: data.user.id, username: username }]);
-        if (profileError) throw profileError;
+        // Profile is auto-created by the database trigger (handle_new_user)
 
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;

@@ -178,17 +178,35 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
         navigate('/login');
     };
 
-    const handleSendChallenge = () => {
-        if (!socket || !selectedTopic || !activeUser || challengeStatus === 'sending') return;
-        setChallengStatus('sending');
-        setChallengeFeedback('');
+    const handleSendChallenge = async () => {
+        if (!challengeQuestion.trim() || challengeQuestion.trim().length < 5) return;
+        setChallengStatus('creating');
+
+        // Find or create topic
+        const questionText = challengeQuestion.trim();
+        const categoryText = challengeTopic.trim();
+
+        let topicId = null;
+        const { data: existing } = await supabase.from('topics').select('*').eq('title', questionText).single();
+        if (existing) {
+            topicId = existing.id;
+        } else {
+            // Insert topic
+            if (categoryText) {
+                const { data: catCheck } = await supabase.from('topics').select('id').eq('title', categoryText).single();
+                if (!catCheck) await supabase.from('topics').insert({ title: categoryText, category: 'Community' });
+            }
+            const { data: newTopic } = await supabase.from('topics').insert({ title: questionText, category: categoryText || 'Community' }).select().single();
+            if (newTopic) topicId = newTopic.id;
+        }
+
         socket.emit('send_challenge', {
             targetUserId: activeUser.id,
-            topicId: selectedTopic.id,
-            topicTitle: selectedTopic.title,
+            topicId,
+            topicTitle: questionText,
             challengerStance: selectedStance
         });
-        // Safety timeout: reset spinner if no response in 20s (accounts for Render cold starts)
+        // Safety timeout
         challengeTimeoutRef.current = setTimeout(() => {
             setChallengStatus('error');
             setChallengeFeedback('Server took too long to respond. Please try again.');
@@ -413,6 +431,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
                             <p className="text-sm font-medium text-slate-300">Live Server Connected</p>
                         </div>
                     </div>
+
                 </div>
 
                 {/* Fixed Action Footer */}

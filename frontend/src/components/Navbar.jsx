@@ -1,20 +1,57 @@
 import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, Bell } from 'lucide-react';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
-const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeedRefresh, updateServiceWorker }) => {
+const Navbar = ({ user, onCreateArena, onJoinArena, notifications = [], unreadCount = 0, socket, onMarkRead, needRefresh, setNeedRefresh, updateServiceWorker }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
 
   const isActive = (path) => location.pathname === path;
 
   // Close menu on route change
   useEffect(() => {
     setIsMenuOpen(false);
+    setIsNotifOpen(false);
   }, [location.pathname]);
+
+  const handleAcceptChallenge = (notif) => {
+    if (!socket || !notif.metadata?.challengeId) return;
+    socket.emit('accept_challenge', { challengeId: notif.metadata.challengeId });
+    // Navigate to lobby with challenge context
+    navigate(`/lobby/${notif.metadata.topicId || 'challenge'}`, {
+      state: {
+        topic: { id: notif.metadata.topicId, title: notif.metadata.topicTitle },
+        challengeId: notif.metadata.challengeId,
+        arenaCode: notif.metadata.arenaCode
+      }
+    });
+    setIsNotifOpen(false);
+    if (onMarkRead) onMarkRead([notif.id]);
+  };
+
+  const handleViewChallenge = (notif) => {
+    navigate(`/lobby/${notif.metadata?.topicId || 'challenge'}`, {
+      state: {
+        topic: { id: notif.metadata?.topicId, title: notif.metadata?.topicTitle },
+        challengeId: notif.metadata?.challengeId
+      }
+    });
+    setIsNotifOpen(false);
+    if (onMarkRead) onMarkRead([notif.id]);
+  };
+
+  const formatTimeAgo = (dateStr) => {
+    const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  };
 
   return (
     <>
@@ -69,8 +106,105 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
               </button>
             </div>
 
-            {/* Notification Bell */}
-            {user && <NotificationBell socket={socket} user={user} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} />}
+            {/* Notification Bell (combines local SW-aware NotificationBell with remote notification dropdown if desired, but here we just use the remote one or keep the local component since it's cleaner) */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 h-5 w-5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-lg shadow-rose-500/40">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+                {/* Visual indicator for PWA updates if any */}
+                {needRefresh && !unreadCount && (
+                   <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full animate-bounce shadow-[0_0_10px_rgba(16,185,129,0.5)]"></span>
+                )}
+              </button>
+
+              {/* Notification Dropdown */}
+              {isNotifOpen && (
+                <div className="absolute right-0 top-12 w-80 sm:w-96 bg-slate-900 border border-slate-700/50 rounded-2xl shadow-2xl overflow-hidden z-50">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+                    <h3 className="text-sm font-bold text-slate-100">Notifications</h3>
+                    <div className="flex gap-3">
+                      {needRefresh && (
+                        <button
+                          onClick={() => updateServiceWorker(true)}
+                          className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider"
+                        >
+                          Update App
+                        </button>
+                      )}
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={() => onMarkRead && onMarkRead(null)}
+                          className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 uppercase tracking-wider"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center text-slate-500 text-sm">No notifications yet</div>
+                    ) : (
+                      notifications.slice(0, 10).map(notif => (
+                        <div
+                          key={notif.id}
+                          className={`px-4 py-3 border-b border-slate-800/50 transition-colors ${
+                            !notif.is_read ? 'bg-indigo-500/5' : ''
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`shrink-0 mt-1 h-2 w-2 rounded-full ${!notif.is_read ? 'bg-cyan-400' : 'bg-slate-700'}`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold text-slate-300 uppercase tracking-wider">{notif.title}</p>
+                              <p className="text-sm text-slate-400 mt-0.5 line-clamp-2">{notif.message}</p>
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-[10px] text-slate-600">{formatTimeAgo(notif.created_at)}</span>
+
+                                {notif.type === 'challenge_received' && !notif.metadata?.expired && (
+                                  <button
+                                    onClick={() => handleAcceptChallenge(notif)}
+                                    className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-900 rounded-lg transition-all shadow-lg shadow-cyan-500/20"
+                                  >
+                                    Accept
+                                  </button>
+                                )}
+                                {notif.type === 'challenge_accepted' && (
+                                  <button
+                                    onClick={() => handleViewChallenge(notif)}
+                                    className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg transition-all"
+                                  >
+                                    Enter Arena
+                                  </button>
+                                )}
+                                {notif.type === 'user_joined_arena' && (
+                                  <button
+                                    onClick={() => handleViewChallenge(notif)}
+                                    className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg transition-all"
+                                  >
+                                    Join Now
+                                  </button>
+                                )}
+                                {notif.metadata?.expired && (
+                                  <span className="text-[10px] font-bold text-rose-400 uppercase">Expired</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Desktop Account Button */}
             <button
@@ -158,6 +292,11 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
             </button>
           </div>
         </div>
+      )}
+
+      {/* Close notification dropdown when clicking outside */}
+      {isNotifOpen && (
+        <div className="fixed inset-0 z-30" onClick={() => setIsNotifOpen(false)} />
       )}
 
       <ProfileModal 

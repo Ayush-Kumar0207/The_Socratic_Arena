@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense, useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { supabase } from './lib/supabaseClient';
@@ -63,6 +63,18 @@ const App = () => {
     onRegisterError(error) { console.error('[PWA] SW Registration Error:', error); },
   });
 
+  // Notification state
+  const [notifications, setNotifications] = useState([]);
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  // Challenge flow state (when challenging from profile)
+  const [challengeTarget, setChallengeTarget] = useState(null);
+
+  // Fetch notifications from server
+  const fetchNotifications = useCallback(() => {
+    if (socket?.connected) socket.emit('fetch_notifications');
+  }, []);
+
   useEffect(() => {
     // Auth Resilience: Retry with Exponential Backoff (500ms, 1s, 2s)
     const fetchSession = async (retryCount = 0) => {
@@ -107,6 +119,7 @@ const App = () => {
             socket.connect();
           }
         }
+
       } else {
         socket.disconnect();
       }
@@ -117,6 +130,58 @@ const App = () => {
     };
   }, []);
 
+  // Socket listeners for notifications & challenges
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNotificationsList = ({ notifications: notifs }) => setNotifications(notifs || []);
+    const handleChallengeReceived = (data) => {
+      setNotifications(prev => [{
+        id: `rt_${Date.now()}`,
+        type: 'challenge_received',
+        title: 'Challenge Received!',
+        message: `${data.challengerName} challenged you on "${data.topicTitle}"`,
+        metadata: data,
+        is_read: false,
+        created_at: new Date().toISOString()
+      }, ...prev]);
+    };
+    const handleChallengeAccepted = (data) => {
+      setNotifications(prev => [{
+        id: `rt_${Date.now()}`,
+        type: 'challenge_accepted',
+        title: 'Challenge Accepted!',
+        message: `${data.acceptorName} accepted your challenge!`,
+        metadata: data,
+        is_read: false,
+        created_at: new Date().toISOString()
+      }, ...prev]);
+    };
+    const handleChallengeExpired = ({ challengeId }) => {
+      setNotifications(prev => prev.map(n =>
+        n.metadata?.challengeId === challengeId ? { ...n, metadata: { ...n.metadata, expired: true } } : n
+      ));
+    };
+    const handleConnect = () => fetchNotifications();
+
+    socket.on('notifications_list', handleNotificationsList);
+    socket.on('challenge_received', handleChallengeReceived);
+    socket.on('challenge_accepted', handleChallengeAccepted);
+    socket.on('challenge_expired', handleChallengeExpired);
+    socket.on('connect', handleConnect);
+
+    // Fetch on mount if already connected
+    if (socket.connected) fetchNotifications();
+
+    return () => {
+      socket.off('notifications_list', handleNotificationsList);
+      socket.off('challenge_received', handleChallengeReceived);
+      socket.off('challenge_accepted', handleChallengeAccepted);
+      socket.off('challenge_expired', handleChallengeExpired);
+      socket.off('connect', handleConnect);
+    };
+  }, [fetchNotifications]);
+
   if (isAuthLoading) {
     return null; // index.html skeleton spinner is already visible
   }
@@ -124,7 +189,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
       {/* Render persistent Navbar only for authenticated users */}
-      {session && <Navbar user={session.user} socket={socket} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} />}
+      {session && <Navbar user={session.user} socket={socket} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} notifications={notifications} unreadCount={unreadCount} onMarkRead={(ids) => { socket.emit('mark_notifications_read', { notificationIds: ids }); setNotifications(prev => prev.map(n => ids ? (ids.includes(n.id) ? { ...n, is_read: true } : n) : { ...n, is_read: true })); }} setChallengeTarget={setChallengeTarget} />}
 
       {/* GLOBAL CREATE ARENA DIALOG */}
       {showCreateDialog && <CreateArenaDialog
