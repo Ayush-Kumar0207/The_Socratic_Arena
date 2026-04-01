@@ -6,6 +6,7 @@ import { getTopicDomain } from '../lib/domainUtils';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import ProfileModal from './ProfileModal';
 
+// Deployment trigger
 const Dashboard = ({ user, socket }) => {
   const navigate = useNavigate();
   const [recentMatches, setRecentMatches] = useState(() => {
