@@ -6,7 +6,7 @@ import { getTopicDomain } from '../lib/domainUtils';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import ProfileModal from './ProfileModal';
 
-// Deployment trigger
+// Deployment trigger1
 const Dashboard = ({ user, socket }) => {
   const navigate = useNavigate();
   const [recentMatches, setRecentMatches] = useState(() => {
@@ -161,18 +161,18 @@ const Dashboard = ({ user, socket }) => {
     <ResponsiveContainer width="100%" height={280} className="cognitive-radar focus:outline-none">
       <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
         <PolarGrid stroke="#334155" />
-        <PolarAngleAxis 
-          dataKey="subject" 
-          tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} 
+        <PolarAngleAxis
+          dataKey="subject"
+          tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }}
         />
         <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
-        <Radar 
-          name="Cognitive Profile" 
-          dataKey="score" 
-          stroke="#06b6d4" 
-          fill="#06b6d4" 
-          fillOpacity={0.5} 
-          isAnimationActive={false} 
+        <Radar
+          name="Cognitive Profile"
+          dataKey="score"
+          stroke="#06b6d4"
+          fill="#06b6d4"
+          fillOpacity={0.5}
+          isAnimationActive={false}
         />
       </RadarChart>
     </ResponsiveContainer>
@@ -189,7 +189,7 @@ const Dashboard = ({ user, socket }) => {
         <div className="w-full lg:w-[380px] shrink-0 flex flex-col gap-5 overflow-y-auto pb-6 no-scrollbar">
 
           {/* Mini User ID Card */}
-          <div 
+          <div
             onClick={() => setIsProfileModalOpen(true)}
             className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-center gap-4 cursor-pointer hover:border-slate-700 transition"
           >
@@ -260,8 +260,8 @@ const Dashboard = ({ user, socket }) => {
 
                   return (
                     <div key={user.id} className="flex items-center justify-between p-3 bg-slate-950/50 hover:bg-slate-800 transition-colors border border-slate-800 rounded-xl group cursor-pointer" onClick={() => {
-                        setSelectedProfile(user);
-                        setIsProfileModalOpen(true);
+                      setSelectedProfile(user);
+                      setIsProfileModalOpen(true);
                     }}>
                       <div className="flex items-center gap-4">
                         <div className="h-10 w-10 bg-slate-800 rounded-full flex items-center justify-center font-bold text-cyan-400 border border-slate-700 shadow-inner">
@@ -316,9 +316,9 @@ const Dashboard = ({ user, socket }) => {
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex flex-col gap-2">
                         <span className={`px-2 py-1 rounded text-xs font-semibold uppercase tracking-wider w-fit ${match.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                            match.status === 'pending_votes' ? 'bg-purple-500/20 text-purple-400' :
-                              match.status === 'abandoned' ? 'bg-red-500/20 text-red-400' :
-                                'bg-yellow-500/20 text-yellow-400'
+                          match.status === 'pending_votes' ? 'bg-purple-500/20 text-purple-400' :
+                            match.status === 'abandoned' ? 'bg-red-500/20 text-red-400' :
+                              'bg-yellow-500/20 text-yellow-400'
                           }`}>
                           {match.status === 'pending_votes' ? 'In Deliberation' : match.status}
                         </span>
@@ -372,7 +372,7 @@ const Dashboard = ({ user, socket }) => {
 
       </div>
 
-      <ProfileModal 
+      <ProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => {
           setIsProfileModalOpen(false);
