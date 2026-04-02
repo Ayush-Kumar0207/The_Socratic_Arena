@@ -373,7 +373,7 @@ setInterval(async () => {
           .update({ type: 'challenge_expired', title: 'Challenge Expired', is_read: false })
           .eq('type', 'challenge_sent')
           .filter('metadata->>challenge_id', 'eq', ch.id);
-        
+
         await supabase.from('notifications')
           .update({ type: 'challenge_expired', title: 'Challenge Expired', is_read: false })
           .eq('type', 'challenge_invite')
@@ -487,30 +487,30 @@ app.post('/api/matches/:id/summary', async (req, res) => {
 app.post('/api/admin/broadcast-notification', async (req, res) => {
   try {
     const { title, message, type = 'system_announcement', metadata = {}, adminSecret } = req.body;
-    
+
     // Basic admin authentication via secret key
     if (adminSecret !== process.env.ADMIN_SECRET) {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
-    
+
     if (!title || !message) {
       return res.status(400).json({ success: false, message: 'Title and message are required' });
     }
-    
+
     // Fetch all user IDs
     const { data: users, error: usersError } = await supabase
       .from('profiles')
       .select('id');
-    
+
     if (usersError) {
       console.error('[Broadcast] Failed to fetch users:', usersError);
       return res.status(500).json({ success: false, message: 'Failed to fetch users' });
     }
-    
+
     if (!users || users.length === 0) {
       return res.status(200).json({ success: true, message: 'No users to notify', count: 0 });
     }
-    
+
     // Create notification for each user
     const notifications = users.map(user => ({
       user_id: user.id,
@@ -519,23 +519,23 @@ app.post('/api/admin/broadcast-notification', async (req, res) => {
       message,
       metadata: { ...metadata, broadcast: true, broadcast_at: new Date().toISOString() }
     }));
-    
+
     // Bulk insert notifications
     const { error: insertError } = await supabase
       .from('notifications')
       .insert(notifications);
-    
+
     if (insertError) {
       console.error('[Broadcast] Failed to insert notifications:', insertError);
       return res.status(500).json({ success: false, message: 'Failed to create notifications' });
     }
-    
+
     // Emit real-time event to ALL connected sockets to refresh their notifications
     io.emit('notification_new');
-    
+
     console.log(`[Broadcast] ✅ Sent "${title}" notification to ${users.length} users`);
     res.json({ success: true, message: `Notification sent to ${users.length} users`, count: users.length });
-    
+
   } catch (err) {
     console.error('[Broadcast] Error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -818,7 +818,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     // Also store ELO changes for display on the match review page
     const eloChangeLeaver = newLeaverRating - rLeaver;
     const eloChangeStayer = newStayerRating - rStayer;
-    
+
     const matchUpdateData = {
       status: 'abandoned',
       transcript: savedTranscript,
@@ -828,7 +828,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     if (stayerProfile.id) matchUpdateData.winner_id = stayerId;
 
     const { error: matchErr } = await withTimeout(supabase.from('matches').update(matchUpdateData).eq('id', matchId), 10000);
-    
+
     if (matchErr && matchErr.message.includes('winner_id')) {
       console.warn(`[resolve_abandoned] Restoration of winner_id failed (column likely missing). Retrying with status only.`);
       await withTimeout(supabase.from('matches').update({ status: 'abandoned', transcript: savedTranscript }).eq('id', matchId), 10000);
@@ -1086,7 +1086,7 @@ io.on('connection', (socket) => {
           critic_id: critic.userId,
           defender_id: defender.userId
         }).select().single(), 10000);
-        
+
         if (error) {
           console.warn('[matchmaking] DB Insert failed, match will be transient:', error.message);
           isTransient = true;
@@ -1215,13 +1215,13 @@ io.on('connection', (socket) => {
     // Verify it's the player's turn
     const userId = socket.verifiedUserId;
     let playerRole = null;
-    
+
     // Robust check: match by authenticated User ID
     if (userId) {
       if (room.critic_id === userId) playerRole = 'Critic';
       else if (room.defender_id === userId) playerRole = 'Defender';
     }
-    
+
     // Fallback: match by Socket ID
     if (!playerRole) {
       if (room.players.critic === socket.id) playerRole = 'Critic';
@@ -1290,7 +1290,7 @@ io.on('connection', (socket) => {
       if (room.critic_id === userId) { playerRole = 'Critic'; callerId = userId; }
       else if (room.defender_id === userId) { playerRole = 'Defender'; callerId = userId; }
     }
-    
+
     if (!playerRole) {
       if (room.players.critic === socket.id) { playerRole = 'Critic'; callerId = room.critic_id || socket.id; }
       else if (room.players.defender === socket.id) { playerRole = 'Defender'; callerId = room.defender_id || socket.id; }
@@ -1548,25 +1548,25 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
     const userId = socket.verifiedUserId;
     try {
       const code = (arenaCode || '').trim().toUpperCase();
-      
+
       // --- DB Propagation Retry Loop (up to 5 tries with 500ms delay) ---
       let arena = null;
       let error = null;
       let attempts = 0;
-      
+
       while (attempts < 5) {
         const { data, error: fetchError } = await supabase
           .from('private_arenas').select('*').eq('arena_code', code).maybeSingle();
-        
+
         arena = data;
         error = fetchError;
-        
+
         if (arena) break; // found it
         if (error) {
-           console.error(`[Private Arena] join fetchError on attempt ${attempts}:`, error);
-           break; // real error
+          console.error(`[Private Arena] join fetchError on attempt ${attempts}:`, error);
+          break; // real error
         }
-        
+
         // --- Not found yet? Wait and retry ---
         attempts++;
         console.log(`[Private Arena] Arena ${code} not found yet, attempt ${attempts}/5... sleeping 1s`);
@@ -1577,7 +1577,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
         console.error(`[Private Arena] Failing join for ${code}. error:`, error, 'arena:', arena);
         return socket.emit('private_arena_error', { message: 'Invalid or expired Arena Code. (Debug: Timeout loading from DB)' });
       }
-      
+
       if (['completed', 'abandoned', 'expired'].includes(arena.status)) {
         return socket.emit('private_arena_error', { message: `Invalid or expired Arena Code. (Debug: Status is ${arena.status})` });
       }
@@ -1588,11 +1588,11 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
           .update({ joiner_id: userId, status: 'paired' })
           .eq('id', arena.id);
         if (updateError) throw updateError;
-        
+
         // Update local arena object for the pairing broadcast below
         arena.joiner_id = userId;
         arena.status = 'paired';
-      } 
+      }
       // --- Case 2: Challenge/Re-entry (status is already paired) ---
       else if (arena.status === 'paired') {
         const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
@@ -1611,18 +1611,18 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
         if (!isAuthorized) {
           return socket.emit('private_arena_error', { message: 'This arena is already full.' });
         }
-        
+
         // Redirect directly to the ongoing match
         if (arena.match_id) {
           const { data: match } = await supabase.from('matches')
             .select('*').eq('id', arena.match_id).single();
-          
+
           if (match && match.status === 'active') {
             socket.join(arena.match_id);
             socket.currentMatchId = arena.match_id;
-            
+
             const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
-            
+
             socket.emit('match_found', {
               roomId: arena.match_id,
               topic: arena.topic_title,
@@ -1630,12 +1630,12 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
               defenderUserId: match.defender_id,
               roles: { [socket.id]: myRole }
             });
-            
+
             console.log(`[Private Arena] Re-entry via join: ${userId} rejoined match ${arena.match_id} as ${myRole}`);
             return;
           }
         }
-        
+
         return socket.emit('private_arena_error', { message: 'This debate has already ended.' });
       }
       else {
@@ -1669,29 +1669,17 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
   /**
    * private_arena_set_stance — Player picks stance, broadcasts to both.
    */
-  socket.on('private_arena_set_stance', async ({ arenaId, stance }) => {
+  socket.on('private_arena_set_stance', async ({ arenaId, stance, role }) => {
     try {
-      const userId = socket.verifiedUserId;
-      if (!userId) return;
-
-      const { data: arena, error: fetchErr } = await supabase.from('private_arenas')
-        .select('creator_id, joiner_id, creator_stance, joiner_stance').eq('id', arenaId).single();
-      
-      if (fetchErr || !arena) return;
-
-      let field = null;
-      if (userId === arena.creator_id) field = 'creator_stance';
-      else if (userId === arena.joiner_id) field = 'joiner_stance';
-      else return; // Unauthorized
-
+      const field = role === 'creator' ? 'creator_stance' : 'joiner_stance';
       await supabase.from('private_arenas').update({ [field]: stance }).eq('id', arenaId);
 
-      const { data: updatedArena } = await supabase.from('private_arenas')
+      const { data: arena } = await supabase.from('private_arenas')
         .select('creator_stance, joiner_stance').eq('id', arenaId).single();
 
       io.to(`private_${arenaId}`).emit('private_arena_stance_update', {
-        creatorStance: updatedArena?.creator_stance,
-        joinerStance: updatedArena?.joiner_stance
+        creatorStance: arena?.creator_stance,
+        joinerStance: arena?.joiner_stance
       });
     } catch (err) {
       console.error('[Private Arena] Stance error:', err);
@@ -1704,105 +1692,55 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
    */
   socket.on('start_private_debate', async ({ arenaId }) => {
     try {
-      // --- Concurrency guard: prevent double-start from both players clicking simultaneously ---
-      if (startingArenas.has(arenaId)) {
-        console.log(`[Private Arena] Duplicate start_private_debate for ${arenaId}, waiting for first caller to finish...`);
-        await new Promise(r => setTimeout(r, 2000));
-        const { data: retryArena } = await supabase.from('private_arenas').select('*').eq('id', arenaId).single();
-        if (retryArena && retryArena.status === 'started' && retryArena.match_id) {
-          const userId = socket.verifiedUserId;
-          const { data: match } = await supabase.from('matches').select('*').eq('id', retryArena.match_id).single();
-          if (match && match.status === 'active') {
-            socket.join(retryArena.match_id);
-            socket.currentMatchId = retryArena.match_id;
-            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
-            socket.emit('match_found', { roomId: retryArena.match_id, topic: retryArena.topic_title, criticUserId: match.critic_id, defenderUserId: match.defender_id, roles: { [socket.id]: myRole } });
-            console.log(`[Private Arena] Concurrent re-entry: ${userId} joined match ${retryArena.match_id} as ${myRole}`);
-            return;
-          }
-        }
-        socket.emit('private_arena_error', { message: 'Debate is being started, please wait...' });
-        return;
-      }
-      startingArenas.add(arenaId);
-
       const { data: arena, error } = await supabase.from('private_arenas')
         .select('*').eq('id', arenaId).single();
 
       if (error || !arena) {
-        startingArenas.delete(arenaId);
         socket.emit('private_arena_error', { message: 'Arena not found.' });
         return;
       }
-      
+
       // --- Graceful Re-entry: Arena already started ---
       if (arena.status === 'started') {
-        startingArenas.delete(arenaId);
         const userId = socket.verifiedUserId;
         const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
-        
+
         if (!isAuthorized) {
           socket.emit('private_arena_error', { message: 'This arena is already in progress.' });
           return;
         }
-        
+
+        // User is a participant — redirect to the existing match
         if (arena.match_id) {
           const { data: match } = await supabase.from('matches')
             .select('*').eq('id', arena.match_id).single();
-          
+
           if (match && match.status === 'active') {
+            // Re-join the match room
             socket.join(arena.match_id);
             socket.currentMatchId = arena.match_id;
+
             const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
+
             socket.emit('match_found', {
-              roomId: arena.match_id, topic: arena.topic_title,
-              criticUserId: match.critic_id, defenderUserId: match.defender_id,
+              roomId: arena.match_id,
+              topic: arena.topic_title,
+              criticUserId: match.critic_id,
+              defenderUserId: match.defender_id,
               roles: { [socket.id]: myRole }
             });
+
             console.log(`[Private Arena] Re-entry: ${userId} rejoined match ${arena.match_id} as ${myRole}`);
             return;
           }
         }
+
+        // Match not found or completed — inform user gracefully
         socket.emit('private_arena_error', { message: 'This debate has already ended.' });
         return;
       }
-
-      // --- NEW FIX: Only arena creator can start ---
-      if (socket.verifiedUserId !== arena.creator_id) {
-        startingArenas.delete(arenaId);
-        socket.emit('private_arena_error', { message: 'Only the arena creator can start the debate.' });
-        return;
-      }
-
       if (!arena.joiner_id) {
-        startingArenas.delete(arenaId);
         socket.emit('private_arena_error', { message: 'Waiting for opponent to join first.' });
-        return;
-      }
-
-      // --- Atomic status transition: paired → starting (optimistic lock) ---
-      const { data: lockResult, error: lockError } = await supabase
-        .from('private_arenas').update({ status: 'starting' })
-        .eq('id', arenaId).eq('status', 'paired').select('id');
-      
-      if (lockError || !lockResult || lockResult.length === 0) {
-        startingArenas.delete(arenaId);
-        console.log(`[Private Arena] Lost optimistic lock for ${arenaId}, attempting re-entry...`);
-        await new Promise(r => setTimeout(r, 1500));
-        const { data: retryArena } = await supabase.from('private_arenas').select('*').eq('id', arenaId).single();
-        if (retryArena && retryArena.status === 'started' && retryArena.match_id) {
-          const userId = socket.verifiedUserId;
-          const { data: match } = await supabase.from('matches').select('*').eq('id', retryArena.match_id).single();
-          if (match && match.status === 'active') {
-            socket.join(retryArena.match_id);
-            socket.currentMatchId = retryArena.match_id;
-            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
-            socket.emit('match_found', { roomId: retryArena.match_id, topic: retryArena.topic_title, criticUserId: match.critic_id, defenderUserId: match.defender_id, roles: { [socket.id]: myRole } });
-            console.log(`[Private Arena] Lock-lost re-entry: ${userId} joined match ${retryArena.match_id} as ${myRole}`);
-            return;
-          }
-        }
-        socket.emit('private_arena_error', { message: 'Debate is being started, please wait...' });
         return;
       }
 
@@ -1819,58 +1757,84 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       const criticUserId = creatorRole === 'Critic' ? arena.creator_id : arena.joiner_id;
       const defenderUserId = creatorRole === 'Defender' ? arena.creator_id : arena.joiner_id;
 
-      // Create match with increased timeout
+      // Create match
       const { data: matchData, error: matchError } = await withTimeout(supabase.from('matches').insert({
         topic: arena.topic_title,
         topic_title: arena.topic_title,
         status: 'active',
         critic_id: criticUserId,
         defender_id: defenderUserId
-      }).select().single(), 15000);
-      
-      if (matchError) {
-        console.error('[Private Arena] Match insert failed:', matchError);
-        await supabase.from('private_arenas').update({ status: 'paired' }).eq('id', arenaId);
-        startingArenas.delete(arenaId);
-        socket.emit('private_arena_error', { message: 'Failed to create match. Please try again.' });
-        return;
-      }
+      }).select().single(), 10000);
+      if (matchError) throw matchError;
 
       const roomId = matchData.id;
       await supabase.from('private_arenas').update({ status: 'started', match_id: roomId }).eq('id', arenaId);
 
       // Get sockets in private room and move them to match room
-      const socketsInRoom = await io.in(`private_${arenaId}`).fetchSockets();
+      const room = io.sockets.adapter.rooms.get(`private_${arenaId}`);
+      
+      // CRITICAL FIX: Properly identify critic and defender sockets by their tagged roles
       let criticSid = null;
       let defenderSid = null;
-      
-      for (const s of socketsInRoom) {
-        s.join(roomId);
-        s.currentMatchId = roomId;
-        if (s.privateArenaRole === 'creator') {
-          if (creatorRole === 'Critic') criticSid = s.id;
-          else defenderSid = s.id;
-        } else if (s.privateArenaRole === 'joiner') {
-          if (joinerRole === 'Critic') criticSid = s.id;
-          else defenderSid = s.id;
+      const connectedSockets = [];
+
+      if (room) {
+        for (const sid of room) {
+          const s = io.sockets.sockets.get(sid);
+          if (s) {
+            connectedSockets.push(s);
+            s.join(roomId);
+            s.currentMatchId = roomId;
+
+            // Determine if this socket's owner is the critic or defender
+            if (s.privateArenaRole === 'creator') {
+              if (creatorRole === 'Critic') {
+                criticSid = s.id;
+              } else {
+                defenderSid = s.id;
+              }
+            } else if (s.privateArenaRole === 'joiner') {
+              if (joinerRole === 'Critic') {
+                criticSid = s.id;
+              } else {
+                defenderSid = s.id;
+              }
+            }
+          }
         }
       }
-      
-      if (!criticSid) criticSid = socketsInRoom[0]?.id || 'unknown';
-      if (!defenderSid) defenderSid = socketsInRoom[1]?.id || socketsInRoom[0]?.id || 'unknown';
+
+      // Fallback to array order if roles weren't properly tagged
+      if (!criticSid) criticSid = connectedSockets[0]?.id || 'unknown';
+      if (!defenderSid) defenderSid = connectedSockets[1]?.id || connectedSockets[0]?.id || 'unknown';
 
       activeRooms[roomId] = {
         players: { critic: criticSid, defender: defenderSid },
-        critic_id: criticUserId, defender_id: defenderUserId,
-        topic: arena.topic_title, activeSpeaker: 'Critic',
-        criticTime: 300, defenderTime: 300,
-        transcript: [], status: 'active', startTime: Date.now(),
-        lifelines: { [criticUserId]: 1, [defenderUserId]: 1 }
+        critic_id: criticUserId,
+        defender_id: defenderUserId,
+        topic: arena.topic_title,
+        activeSpeaker: 'Critic',
+        criticTime: 300,
+        defenderTime: 300,
+        transcript: [],
+        status: 'active',
+        startTime: Date.now(),
+        lifelines: {
+          [criticUserId]: 1,
+          [defenderUserId]: 1
+        }
       };
 
+      // Emit match_found — clients identify their role via userId
       io.to(roomId).emit('match_found', {
-        roomId, topic: arena.topic_title, criticUserId, defenderUserId,
-        roles: { [criticSid]: 'Critic', [defenderSid]: 'Defender' }
+        roomId,
+        topic: arena.topic_title,
+        criticUserId,
+        defenderUserId,
+        roles: {
+          [criticSid]: 'Critic',
+          [defenderSid]: 'Defender'
+        }
       });
 
       startRoomTimer(roomId);
@@ -1878,15 +1842,9 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
 
       console.log(`[Private Arena] Debate started! Room: ${roomId}, Topic: "${arena.topic_title}", Critic: ${criticSid}, Defender: ${defenderSid}`);
     } catch (err) {
-      console.error('[Private Arena] Start error:', err?.message || err);
-      try {
-        await supabase.from('private_arenas').update({ status: 'paired' }).eq('id', arenaId).eq('status', 'starting');
-      } catch (rollbackErr) {
-        console.error('[Private Arena] Rollback failed:', rollbackErr);
-      }
-      socket.emit('private_arena_error', { message: 'Failed to start debate. Please try again.' });
-    } finally {
-      startingArenas.delete(arenaId);
+      console.error('[Private Arena] Start error:', err);
+      // Surface actual error to client (fallback logic prevents "null" object errors usually, but Supabase matches table inserts may throw constraints)
+      socket.emit('private_arena_error', { message: `Failed to start debate. (${err?.message || err})` });
     }
   });
 
@@ -2709,7 +2667,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           .eq('type', 'challenge_invite')
           .filter('metadata->>challenge_id', 'eq', challengeId)
           .maybeSingle();
-          
+
         if (inviteNotif) {
           await supabase.from('notifications').update({
             type: 'challenge_accepted',
@@ -2734,7 +2692,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           .eq('type', 'challenge_sent')
           .filter('metadata->>challenge_id', 'eq', challengeId)
           .maybeSingle();
-          
+
         if (sentNotif) {
           await supabase.from('notifications').update({
             type: 'challenge_accepted',
@@ -2789,7 +2747,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           .eq('type', 'challenge_invite')
           .filter('metadata->>challenge_id', 'eq', challengeId)
           .maybeSingle();
-          
+
         if (inviteNotif) {
           await supabase.from('notifications').update({
             type: 'challenge_declined',
@@ -2811,7 +2769,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           .eq('type', 'challenge_sent')
           .filter('metadata->>challenge_id', 'eq', challengeId)
           .maybeSingle();
-          
+
         if (sentNotif) {
           await supabase.from('notifications').update({
             type: 'challenge_declined',
@@ -2831,7 +2789,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           declined_by: challengedName,
           topic_title: challenge.topic_title
         });
-        
+
         // Emit to the challenged user so their UI can clear immediately
         socket.emit('challenge_declined', {
           challenge_id: challengeId,
@@ -2872,7 +2830,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         const arenaIds = data
           .filter(n => n.type === 'challenge_accepted' && n.metadata?.arena_id)
           .map(n => n.metadata.arena_id);
-          
+
         if (arenaIds.length > 0) {
           const { data: matches } = await supabase
             .from('matches')
@@ -2929,7 +2887,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         // Clear specific notifications
         await supabase.from('notifications').delete().in('id', notificationIds).eq('user_id', userId);
       }
-      
+
       // Re-fetch and emit the updated list
       const { data } = await supabase
         .from('notifications')
@@ -2937,7 +2895,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(50);
-        
+
       socket.emit('notifications_list', { notifications: data || [] });
       console.log(`[Notifications] Cleared ${notificationIds?.length || 'ALL'} notifications for user ${userId}`);
     } catch (err) {
@@ -3062,7 +3020,7 @@ async function broadcastUpgradeOnStartup() {
   await sleep(5000);
 
   // Emit real-time event to trigger PWA upgrade notification on all connected clients
-  io.emit('app_upgrade_available', { 
+  io.emit('app_upgrade_available', {
     version: new Date().toISOString(),
     message: 'A newer version of Socratic Arena is ready.'
   });
@@ -3073,7 +3031,7 @@ async function broadcastUpgradeOnStartup() {
 try {
   httpServer.listen(PORT, () => {
     console.log(`🚀 Server is listening on http://localhost:${PORT}`);
-    
+
     // Trigger upgrade broadcast after server is ready
     broadcastUpgradeOnStartup();
   });

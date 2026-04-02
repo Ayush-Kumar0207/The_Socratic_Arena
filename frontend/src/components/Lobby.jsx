@@ -9,7 +9,7 @@ const Lobby = ({ socket, user }) => {
   const navigate = useNavigate();
   const [isMatchmaking, setIsMatchmaking] = useState(false);
   const [selectedRole, setSelectedRole] = useState('Random');
-  
+
   // Private Arena state
   const [arenaCode, setArenaCode] = useState(null);
   const [arenaId, setArenaId] = useState(null);
@@ -30,7 +30,7 @@ const Lobby = ({ socket, user }) => {
 
   // Check if we arrived via "Join Arena" with an arenaCode in route state
   const incomingArenaCode = location.state?.arenaCode;
-  
+
   // Extract topic from route state (or fallback)
   const topic = location.state?.topic || { id: topicId, title: 'Unknown Topic' };
 
@@ -98,8 +98,7 @@ const Lobby = ({ socket, user }) => {
 
     const handlePrivateError = ({ message }) => {
       setPrivateError(message);
-      setIsMatchmaking(false); // Reset matchmaking so user can retry
-      
+
       // If debate has ended, redirect back after showing the error
       if (message && (message.includes('already ended') || message.includes('expired') || message.includes('already full'))) {
         setTimeout(() => {
@@ -274,10 +273,10 @@ const Lobby = ({ socket, user }) => {
       setIsMatchmaking(true);
       return;
     }
-    
+
     // Normal queue matchmaking
     setIsMatchmaking(true);
-    socket.emit('join_queue', { 
+    socket.emit('join_queue', {
       userId: user?.id,
       topicId: topic.id,
       topicTitle: topic.title,
@@ -336,7 +335,7 @@ const Lobby = ({ socket, user }) => {
   return (
     <div data-v="1.0.2-clean-arena" className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8 items-center justify-center">
       <div className="max-w-4xl w-full bg-slate-900/50 backdrop-blur-md border border-[#1e293b] rounded-3xl p-8 sm:p-12 shadow-2xl relative overflow-hidden">
-        
+
         {/* Decorative corner glows */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
@@ -348,7 +347,7 @@ const Lobby = ({ socket, user }) => {
               Arena Preparation
               <Sparkles className="h-4 w-4" />
             </div>
-            
+
             <h1 className="text-3xl sm:text-5xl font-black text-slate-100 mb-4 leading-tight">
               {topic.title}
             </h1>
@@ -385,8 +384,8 @@ const Lobby = ({ socket, user }) => {
                     <p className="text-lg font-mono font-black text-slate-100 tracking-widest">{arenaCode}</p>
                   </div>
                 </div>
-                <button 
-                  onClick={handleCopyCode} 
+                <button
+                  onClick={handleCopyCode}
                   className="shrink-0 bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 rounded-lg p-2.5 transition-all active:scale-90"
                   title="Copy Arena Code"
                 >
@@ -437,11 +436,10 @@ const Lobby = ({ socket, user }) => {
                   <button
                     key={role.id}
                     onClick={() => setSelectedRole(role.id)}
-                    className={`relative group flex flex-col items-center text-center p-6 rounded-2xl border transition-all duration-300 ${
-                      selectedRole === role.id 
+                    className={`relative group flex flex-col items-center text-center p-6 rounded-2xl border transition-all duration-300 ${selectedRole === role.id
                         ? `bg-slate-800/80 ${role.border} ${role.shadow} ring-2 ring-offset-4 ring-offset-slate-900 ring-opacity-50 ${role.id === 'Critic' ? 'ring-red-500' : role.id === 'Defender' ? 'ring-cyan-500' : 'ring-slate-500'}`
                         : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
-                    }`}
+                      }`}
                   >
                     <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${role.color} flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
                       <role.icon className="h-6 w-6 text-white" />
@@ -450,7 +448,7 @@ const Lobby = ({ socket, user }) => {
                     <p className="text-xs text-slate-500 group-hover:text-slate-400 transition-colors uppercase tracking-wider font-semibold">
                       {role.desc}
                     </p>
-                    
+
                     {selectedRole === role.id && (
                       <div className={`absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gradient-to-r ${role.color} flex items-center justify-center shadow-lg border-2 border-slate-900`}>
                         <ArrowRight className="h-3 w-3 text-white" />
@@ -461,31 +459,19 @@ const Lobby = ({ socket, user }) => {
               </div>
 
               <div className="flex flex-col items-center gap-6 pt-4">
-                <button 
+                <button
                   onClick={handleStartMatchmaking}
-                  disabled={isPaired && myRole === 'joiner'}
-                  className={`group relative w-full sm:w-80 flex items-center justify-center gap-3 text-slate-950 text-xl font-black px-10 py-5 rounded-2xl transition-all overflow-hidden ${
-                    isPaired && myRole === 'joiner' 
-                      ? 'bg-slate-300 opacity-60 cursor-not-allowed' 
-                      : 'bg-white hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)]'
-                  }`}
+                  className="group relative w-full sm:w-80 flex items-center justify-center gap-3 bg-white text-slate-950 text-xl font-black px-10 py-5 rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)] overflow-hidden"
                 >
-                  {(!isPaired || myRole !== 'joiner') && (
-                     <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${
-                       selectedRole === 'Critic' ? 'from-red-500 to-rose-600' : 
-                       selectedRole === 'Defender' ? 'from-cyan-500 to-blue-600' : 
-                       'from-slate-400 to-slate-500'
-                     }`} />
-                  )}
-                  <span>
-                    {!isPaired ? 'Enter Arena' : myRole === 'joiner' ? 'Waiting for host...' : 'Start Debate'}
-                  </span>
-                  {(!isPaired || myRole !== 'joiner') && (
-                    <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
-                  )}
+                  <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${selectedRole === 'Critic' ? 'from-red-500 to-rose-600' :
+                      selectedRole === 'Defender' ? 'from-cyan-500 to-blue-600' :
+                        'from-slate-400 to-slate-500'
+                    }`} />
+                  <span>{isPaired ? 'Start Debate' : 'Enter Arena'}</span>
+                  <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
                 </button>
-                
-                <button 
+
+                <button
                   onClick={() => navigate('/explore')}
                   className="text-slate-500 hover:text-slate-300 transition-all text-sm font-bold uppercase tracking-widest flex items-center gap-2 px-4 py-2"
                 >
@@ -525,9 +511,9 @@ const Lobby = ({ socket, user }) => {
                   )}
                 </div>
               </div>
-              
+
               {!isPaired && (
-                <button 
+                <button
                   onClick={handleLeaveQueue}
                   className="group flex items-center gap-2 text-slate-500 hover:text-rose-500 px-6 py-2 rounded-xl transition-all hover:bg-rose-500/5 font-black uppercase tracking-widest text-xs"
                 >
