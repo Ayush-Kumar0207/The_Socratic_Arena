@@ -92,6 +92,7 @@ const Lobby = ({ socket, user }) => {
 
     const handlePrivateError = ({ message }) => {
       setPrivateError(message);
+      setIsMatchmaking(false); // Reset matchmaking so user can retry
       
       // If debate has ended, redirect back after showing the error
       if (message && (message.includes('already ended') || message.includes('expired') || message.includes('already full'))) {
@@ -357,15 +358,26 @@ const Lobby = ({ socket, user }) => {
               <div className="flex flex-col items-center gap-6 pt-4">
                 <button 
                   onClick={handleStartMatchmaking}
-                  className="group relative w-full sm:w-80 flex items-center justify-center gap-3 bg-white text-slate-950 text-xl font-black px-10 py-5 rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)] overflow-hidden"
+                  disabled={isPaired && myRole === 'joiner'}
+                  className={`group relative w-full sm:w-80 flex items-center justify-center gap-3 text-slate-950 text-xl font-black px-10 py-5 rounded-2xl transition-all overflow-hidden ${
+                    isPaired && myRole === 'joiner' 
+                      ? 'bg-slate-300 opacity-60 cursor-not-allowed' 
+                      : 'bg-white hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)]'
+                  }`}
                 >
-                  <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${
-                    selectedRole === 'Critic' ? 'from-red-500 to-rose-600' : 
-                    selectedRole === 'Defender' ? 'from-cyan-500 to-blue-600' : 
-                    'from-slate-400 to-slate-500'
-                  }`} />
-                  <span>{isPaired ? 'Start Debate' : 'Enter Arena'}</span>
-                  <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
+                  {(!isPaired || myRole !== 'joiner') && (
+                     <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${
+                       selectedRole === 'Critic' ? 'from-red-500 to-rose-600' : 
+                       selectedRole === 'Defender' ? 'from-cyan-500 to-blue-600' : 
+                       'from-slate-400 to-slate-500'
+                     }`} />
+                  )}
+                  <span>
+                    {!isPaired ? 'Enter Arena' : myRole === 'joiner' ? 'Waiting for host...' : 'Start Debate'}
+                  </span>
+                  {(!isPaired || myRole !== 'joiner') && (
+                    <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
+                  )}
                 </button>
                 
                 <button 

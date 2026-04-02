@@ -1615,17 +1615,29 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
   /**
    * private_arena_set_stance — Player picks stance, broadcasts to both.
    */
-  socket.on('private_arena_set_stance', async ({ arenaId, stance, role }) => {
+  socket.on('private_arena_set_stance', async ({ arenaId, stance }) => {
     try {
-      const field = role === 'creator' ? 'creator_stance' : 'joiner_stance';
+      const userId = socket.verifiedUserId;
+      if (!userId) return;
+
+      const { data: arena, error: fetchErr } = await supabase.from('private_arenas')
+        .select('creator_id, joiner_id, creator_stance, joiner_stance').eq('id', arenaId).single();
+      
+      if (fetchErr || !arena) return;
+
+      let field = null;
+      if (userId === arena.creator_id) field = 'creator_stance';
+      else if (userId === arena.joiner_id) field = 'joiner_stance';
+      else return; // Unauthorized
+
       await supabase.from('private_arenas').update({ [field]: stance }).eq('id', arenaId);
 
-      const { data: arena } = await supabase.from('private_arenas')
+      const { data: updatedArena } = await supabase.from('private_arenas')
         .select('creator_stance, joiner_stance').eq('id', arenaId).single();
 
       io.to(`private_${arenaId}`).emit('private_arena_stance_update', {
-        creatorStance: arena?.creator_stance,
-        joinerStance: arena?.joiner_stance
+        creatorStance: updatedArena?.creator_stance,
+        joinerStance: updatedArena?.joiner_stance
       });
     } catch (err) {
       console.error('[Private Arena] Stance error:', err);
@@ -1638,16 +1650,40 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
    */
   socket.on('start_private_debate', async ({ arenaId }) => {
     try {
+      // --- Concurrency guard: prevent double-start from both players clicking simultaneously ---
+      if (startingArenas.has(arenaId)) {
+        console.log(`[Private Arena] Duplicate start_private_debate for ${arenaId}, waiting for first caller to finish...`);
+        await new Promise(r => setTimeout(r, 2000));
+        const { data: retryArena } = await supabase.from('private_arenas').select('*').eq('id', arenaId).single();
+        if (retryArena && retryArena.status === 'started' && retryArena.match_id) {
+          const userId = socket.verifiedUserId;
+          const { data: match } = await supabase.from('matches').select('*').eq('id', retryArena.match_id).single();
+          if (match && match.status === 'active') {
+            socket.join(retryArena.match_id);
+            socket.currentMatchId = retryArena.match_id;
+            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
+            socket.emit('match_found', { roomId: retryArena.match_id, topic: retryArena.topic_title, criticUserId: match.critic_id, defenderUserId: match.defender_id, roles: { [socket.id]: myRole } });
+            console.log(`[Private Arena] Concurrent re-entry: ${userId} joined match ${retryArena.match_id} as ${myRole}`);
+            return;
+          }
+        }
+        socket.emit('private_arena_error', { message: 'Debate is being started, please wait...' });
+        return;
+      }
+      startingArenas.add(arenaId);
+
       const { data: arena, error } = await supabase.from('private_arenas')
         .select('*').eq('id', arenaId).single();
 
       if (error || !arena) {
+        startingArenas.delete(arenaId);
         socket.emit('private_arena_error', { message: 'Arena not found.' });
         return;
       }
       
       // --- Graceful Re-entry: Arena already started ---
       if (arena.status === 'started') {
+        startingArenas.delete(arenaId);
         const userId = socket.verifiedUserId;
         const isAuthorized = arena.creator_id === userId || arena.joiner_id === userId;
         
@@ -1656,37 +1692,63 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
           return;
         }
         
-        // User is a participant — redirect to the existing match
         if (arena.match_id) {
           const { data: match } = await supabase.from('matches')
             .select('*').eq('id', arena.match_id).single();
           
           if (match && match.status === 'active') {
-            // Re-join the match room
             socket.join(arena.match_id);
             socket.currentMatchId = arena.match_id;
-            
             const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
-            
             socket.emit('match_found', {
-              roomId: arena.match_id,
-              topic: arena.topic_title,
-              criticUserId: match.critic_id,
-              defenderUserId: match.defender_id,
+              roomId: arena.match_id, topic: arena.topic_title,
+              criticUserId: match.critic_id, defenderUserId: match.defender_id,
               roles: { [socket.id]: myRole }
             });
-            
             console.log(`[Private Arena] Re-entry: ${userId} rejoined match ${arena.match_id} as ${myRole}`);
             return;
           }
         }
-        
-        // Match not found or completed — inform user gracefully
         socket.emit('private_arena_error', { message: 'This debate has already ended.' });
         return;
       }
+
+      // --- NEW FIX: Only arena creator can start ---
+      if (socket.verifiedUserId !== arena.creator_id) {
+        startingArenas.delete(arenaId);
+        socket.emit('private_arena_error', { message: 'Only the arena creator can start the debate.' });
+        return;
+      }
+
       if (!arena.joiner_id) {
+        startingArenas.delete(arenaId);
         socket.emit('private_arena_error', { message: 'Waiting for opponent to join first.' });
+        return;
+      }
+
+      // --- Atomic status transition: paired → starting (optimistic lock) ---
+      const { data: lockResult, error: lockError } = await supabase
+        .from('private_arenas').update({ status: 'starting' })
+        .eq('id', arenaId).eq('status', 'paired').select('id');
+      
+      if (lockError || !lockResult || lockResult.length === 0) {
+        startingArenas.delete(arenaId);
+        console.log(`[Private Arena] Lost optimistic lock for ${arenaId}, attempting re-entry...`);
+        await new Promise(r => setTimeout(r, 1500));
+        const { data: retryArena } = await supabase.from('private_arenas').select('*').eq('id', arenaId).single();
+        if (retryArena && retryArena.status === 'started' && retryArena.match_id) {
+          const userId = socket.verifiedUserId;
+          const { data: match } = await supabase.from('matches').select('*').eq('id', retryArena.match_id).single();
+          if (match && match.status === 'active') {
+            socket.join(retryArena.match_id);
+            socket.currentMatchId = retryArena.match_id;
+            const myRole = (match.critic_id === userId) ? 'Critic' : 'Defender';
+            socket.emit('match_found', { roomId: retryArena.match_id, topic: retryArena.topic_title, criticUserId: match.critic_id, defenderUserId: match.defender_id, roles: { [socket.id]: myRole } });
+            console.log(`[Private Arena] Lock-lost re-entry: ${userId} joined match ${retryArena.match_id} as ${myRole}`);
+            return;
+          }
+        }
+        socket.emit('private_arena_error', { message: 'Debate is being started, please wait...' });
         return;
       }
 
@@ -1703,77 +1765,58 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       const criticUserId = creatorRole === 'Critic' ? arena.creator_id : arena.joiner_id;
       const defenderUserId = creatorRole === 'Defender' ? arena.creator_id : arena.joiner_id;
 
-      // Create match
+      // Create match with increased timeout
       const { data: matchData, error: matchError } = await withTimeout(supabase.from('matches').insert({
         topic: arena.topic_title,
         topic_title: arena.topic_title,
         status: 'active',
         critic_id: criticUserId,
         defender_id: defenderUserId
-      }).select().single(), 10000);
-      if (matchError) throw matchError;
+      }).select().single(), 15000);
+      
+      if (matchError) {
+        console.error('[Private Arena] Match insert failed:', matchError);
+        await supabase.from('private_arenas').update({ status: 'paired' }).eq('id', arenaId);
+        startingArenas.delete(arenaId);
+        socket.emit('private_arena_error', { message: 'Failed to create match. Please try again.' });
+        return;
+      }
 
       const roomId = matchData.id;
       await supabase.from('private_arenas').update({ status: 'started', match_id: roomId }).eq('id', arenaId);
 
       // Get sockets in private room and move them to match room
       const socketsInRoom = await io.in(`private_${arenaId}`).fetchSockets();
-      
-      // CRITICAL FIX: Properly identify critic and defender sockets by their tagged roles
       let criticSid = null;
       let defenderSid = null;
       
       for (const s of socketsInRoom) {
         s.join(roomId);
         s.currentMatchId = roomId;
-        
-        // Determine if this socket's owner is the critic or defender
         if (s.privateArenaRole === 'creator') {
-          if (creatorRole === 'Critic') {
-            criticSid = s.id;
-          } else {
-            defenderSid = s.id;
-          }
+          if (creatorRole === 'Critic') criticSid = s.id;
+          else defenderSid = s.id;
         } else if (s.privateArenaRole === 'joiner') {
-          if (joinerRole === 'Critic') {
-            criticSid = s.id;
-          } else {
-            defenderSid = s.id;
-          }
+          if (joinerRole === 'Critic') criticSid = s.id;
+          else defenderSid = s.id;
         }
       }
       
-      // Fallback to array order if roles weren't properly tagged
       if (!criticSid) criticSid = socketsInRoom[0]?.id || 'unknown';
       if (!defenderSid) defenderSid = socketsInRoom[1]?.id || socketsInRoom[0]?.id || 'unknown';
 
       activeRooms[roomId] = {
         players: { critic: criticSid, defender: defenderSid },
-        critic_id: criticUserId,
-        defender_id: defenderUserId,
-        topic: arena.topic_title,
-        activeSpeaker: 'Critic',
-        criticTime: 300,
-        defenderTime: 300,
-        transcript: [],
-        status: 'active',
-        startTime: Date.now(),
-        lifelines: {
-          [criticUserId]: 1,
-          [defenderUserId]: 1
-        }
+        critic_id: criticUserId, defender_id: defenderUserId,
+        topic: arena.topic_title, activeSpeaker: 'Critic',
+        criticTime: 300, defenderTime: 300,
+        transcript: [], status: 'active', startTime: Date.now(),
+        lifelines: { [criticUserId]: 1, [defenderUserId]: 1 }
       };
 
-      // Emit match_found — clients identify their role via userId
       io.to(roomId).emit('match_found', {
-        roomId,
-        topic: arena.topic_title,
-        criticUserId,
-        defenderUserId,
-        roles: {
-          [criticSid]: 'Critic',
-          [defenderSid]: 'Defender'
-        }
+        roomId, topic: arena.topic_title, criticUserId, defenderUserId,
+        roles: { [criticSid]: 'Critic', [defenderSid]: 'Defender' }
       });
 
       startRoomTimer(roomId);
@@ -1781,8 +1824,15 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
 
       console.log(`[Private Arena] Debate started! Room: ${roomId}, Topic: "${arena.topic_title}", Critic: ${criticSid}, Defender: ${defenderSid}`);
     } catch (err) {
-      console.error('[Private Arena] Start error:', err);
-      socket.emit('private_arena_error', { message: 'Failed to start debate.' });
+      console.error('[Private Arena] Start error:', err?.message || err);
+      try {
+        await supabase.from('private_arenas').update({ status: 'paired' }).eq('id', arenaId).eq('status', 'starting');
+      } catch (rollbackErr) {
+        console.error('[Private Arena] Rollback failed:', rollbackErr);
+      }
+      socket.emit('private_arena_error', { message: 'Failed to start debate. Please try again.' });
+    } finally {
+      startingArenas.delete(arenaId);
     }
   });
 
