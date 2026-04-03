@@ -20,25 +20,24 @@ const Navbar = ({ user, onCreateArena, onJoinArena, notifications = [], unreadCo
   }, [location.pathname]);
 
   const handleAcceptChallenge = (notif) => {
-    if (!socket || !notif.metadata?.challengeId) return;
-    socket.emit('accept_challenge', { challengeId: notif.metadata.challengeId });
-    // Navigate to lobby with challenge context
-    navigate(`/lobby/${notif.metadata.topicId || 'challenge'}`, {
-      state: {
-        topic: { id: notif.metadata.topicId, title: notif.metadata.topicTitle },
-        challengeId: notif.metadata.challengeId,
-        arenaCode: notif.metadata.arenaCode
-      }
-    });
+    if (!socket || !notif.metadata?.challenge_id) return;
+    socket.emit('respond_challenge', { challengeId: notif.metadata.challenge_id, action: 'accept' });
+    setIsNotifOpen(false);
+    if (onMarkRead) onMarkRead([notif.id]);
+  };
+
+  const handleDeclineChallenge = (notif) => {
+    if (!socket || !notif.metadata?.challenge_id) return;
+    socket.emit('respond_challenge', { challengeId: notif.metadata.challenge_id, action: 'decline' });
     setIsNotifOpen(false);
     if (onMarkRead) onMarkRead([notif.id]);
   };
 
   const handleViewChallenge = (notif) => {
-    navigate(`/lobby/${notif.metadata?.topicId || 'challenge'}`, {
+    navigate(`/lobby/${notif.metadata?.topic_id || 'challenge'}`, {
       state: {
-        topic: { id: notif.metadata?.topicId, title: notif.metadata?.topicTitle },
-        challengeId: notif.metadata?.challengeId
+        topic: { id: notif.metadata?.topic_id, title: notif.metadata?.topic_title },
+        arenaCode: notif.metadata?.arena_code
       }
     });
     setIsNotifOpen(false);
@@ -168,13 +167,21 @@ const Navbar = ({ user, onCreateArena, onJoinArena, notifications = [], unreadCo
                               <div className="flex items-center gap-2 mt-2">
                                 <span className="text-[10px] text-slate-600">{formatTimeAgo(notif.created_at)}</span>
 
-                                {notif.type === 'challenge_received' && !notif.metadata?.expired && (
-                                  <button
-                                    onClick={() => handleAcceptChallenge(notif)}
-                                    className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-900 rounded-lg transition-all shadow-lg shadow-cyan-500/20"
-                                  >
-                                    Accept
-                                  </button>
+                                {notif.type === 'challenge_invite' && !notif.metadata?.expired && (
+                                  <>
+                                    <button
+                                      onClick={() => handleAcceptChallenge(notif)}
+                                      className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-900 rounded-lg transition-all shadow-lg shadow-cyan-500/20"
+                                    >
+                                      Accept
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeclineChallenge(notif)}
+                                      className="text-[10px] font-black uppercase tracking-wider px-3 py-1 bg-slate-700 hover:bg-rose-500 text-slate-300 hover:text-white rounded-lg transition-all"
+                                    >
+                                      Decline
+                                    </button>
+                                  </>
                                 )}
                                 {notif.type === 'challenge_accepted' && (
                                   <button

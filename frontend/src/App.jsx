@@ -29,6 +29,7 @@ const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000', {
 });
 
 const App = () => {
+  const navigate = useNavigate();
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -136,30 +137,30 @@ const App = () => {
 
     const handleNotificationsList = ({ notifications: notifs }) => setNotifications(notifs || []);
     const handleChallengeReceived = (data) => {
+      // Re-fetch from DB to get the canonical challenge_invite notification
+      fetchNotifications();
       setNotifications(prev => [{
         id: `rt_${Date.now()}`,
-        type: 'challenge_received',
+        type: 'challenge_invite',
         title: 'Challenge Received!',
-        message: `${data.challengerName} challenged you on "${data.topicTitle}"`,
+        message: `${data.challenger_name || 'Someone'} challenged you on "${data.topic_title}"`,
         metadata: data,
         is_read: false,
         created_at: new Date().toISOString()
       }, ...prev]);
     };
     const handleChallengeAccepted = (data) => {
-      setNotifications(prev => [{
-        id: `rt_${Date.now()}`,
-        type: 'challenge_accepted',
-        title: 'Challenge Accepted!',
-        message: `${data.acceptorName} accepted your challenge!`,
-        metadata: data,
-        is_read: false,
-        created_at: new Date().toISOString()
-      }, ...prev]);
+      // Auto-navigate BOTH users to the arena preparation lobby
+      navigate(`/lobby/${data.topic_id || 'challenge'}`, {
+        state: {
+          topic: { id: data.topic_id, title: data.topic_title },
+          arenaCode: data.arena_code
+        }
+      });
     };
-    const handleChallengeExpired = ({ challengeId }) => {
+    const handleChallengeExpired = ({ challenge_id }) => {
       setNotifications(prev => prev.map(n =>
-        n.metadata?.challengeId === challengeId ? { ...n, metadata: { ...n.metadata, expired: true } } : n
+        n.metadata?.challenge_id === challenge_id ? { ...n, metadata: { ...n.metadata, expired: true } } : n
       ));
     };
     const handleConnect = () => fetchNotifications();
