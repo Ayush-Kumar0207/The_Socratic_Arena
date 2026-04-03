@@ -103,8 +103,10 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
 
         const handleSent = (data) => {
             if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+            challengeTimeoutRef.current = null;
             setChallengStatus('sent');
-            setChallengeFeedback(`Challenge sent to ${data.target_username}!`);
+            const targetName = data?.target_username || activeUser?.username || 'user';
+            setChallengeFeedback(`Challenge sent to ${targetName}!`);
             setTimeout(() => {
                 setShowChallengeDialog(false);
                 resetChallengeState();
@@ -113,6 +115,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
 
         const handleError = (data) => {
             if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+            challengeTimeoutRef.current = null;
             setChallengStatus('error');
             setChallengeFeedback(data.message || 'Failed to send challenge.');
         };
@@ -124,9 +127,11 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             socket.off('challenge_sent', handleSent);
             socket.off('challenge_error', handleError);
         };
-    }, [socket]);
+    }, [socket, activeUser?.username]);
 
     const resetChallengeState = () => {
+        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+        challengeTimeoutRef.current = null;
         setSelectedTopic(null);
         setSelectedStance('Random');
         setChallengStatus('idle');
@@ -178,34 +183,31 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
         navigate('/login');
     };
 
-    const handleSendChallenge = async () => {
-        if (!challengeQuestion.trim() || challengeQuestion.trim().length < 5) return;
-        setChallengStatus('creating');
-
-        // Find or create topic
-        const questionText = challengeQuestion.trim();
-        const categoryText = challengeTopic.trim();
-
-        let topicId = null;
-        const { data: existing } = await supabase.from('topics').select('*').eq('title', questionText).single();
-        if (existing) {
-            topicId = existing.id;
-        } else {
-            // Insert topic
-            if (categoryText) {
-                const { data: catCheck } = await supabase.from('topics').select('id').eq('title', categoryText).single();
-                if (!catCheck) await supabase.from('topics').insert({ title: categoryText, category: 'Community' });
-            }
-            const { data: newTopic } = await supabase.from('topics').insert({ title: questionText, category: categoryText || 'Community' }).select().single();
-            if (newTopic) topicId = newTopic.id;
+    const handleSendChallenge = () => {
+        if (!socket || !activeUser?.id) {
+            setChallengStatus('error');
+            setChallengeFeedback('Connection issue. Please reopen and try again.');
+            return;
         }
+
+        if (!selectedTopic?.id || !selectedTopic?.title) {
+            setChallengStatus('error');
+            setChallengeFeedback('Please select a valid topic.');
+            return;
+        }
+
+        setChallengStatus('sending');
+        setChallengeFeedback('');
+
+        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
 
         socket.emit('send_challenge', {
             targetUserId: activeUser.id,
-            topicId,
-            topicTitle: questionText,
+            topicId: selectedTopic.id,
+            topicTitle: selectedTopic.title,
             challengerStance: selectedStance
         });
+
         // Safety timeout
         challengeTimeoutRef.current = setTimeout(() => {
             setChallengStatus('error');
