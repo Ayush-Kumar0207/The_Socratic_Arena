@@ -63,10 +63,13 @@ const Login = ({ initialView, onResetComplete }) => {
 
         if (error) throw error;
 
-        // Profile is auto-created by the database trigger (handle_new_user)
-
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInError) throw signInError;
+        // If signup returns a session, the user is already authenticated.
+        // Avoiding an extra sign-in request keeps signup faster.
+        if (!data?.session) {
+          setError('Signup successful. Please verify your email, then sign in.');
+          setIsSignUp(false);
+          return;
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;

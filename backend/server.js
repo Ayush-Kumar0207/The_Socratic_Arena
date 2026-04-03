@@ -608,6 +608,69 @@ const generateRoomId = () => {
   return crypto.randomUUID();
 };
 
+// Cache recently provisioned profiles to avoid repeated upserts on reconnect storms.
+const ensuredProfilesCache = new Map();
+const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const normalizeUsernameHint = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 60);
+};
+
+const isProfileCacheFresh = (userId) => {
+  const lastEnsuredAt = ensuredProfilesCache.get(userId);
+  if (!lastEnsuredAt) return false;
+  return (Date.now() - lastEnsuredAt) < PROFILE_CACHE_TTL_MS;
+};
+
+const markProfileEnsured = (userId) => {
+  ensuredProfilesCache.set(userId, Date.now());
+};
+
+const ensureProfileExists = async (userId, usernameHint = null) => {
+  if (!userId) return false;
+  if (isProfileCacheFresh(userId)) return true;
+
+  const normalizedUsername = normalizeUsernameHint(usernameHint);
+  let payload = normalizedUsername ? { id: userId, username: normalizedUsername } : { id: userId };
+
+  let { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+
+  // Username collisions should never block profile provisioning.
+  if (error && normalizedUsername) {
+    payload = { id: userId };
+    const fallback = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+    error = fallback.error;
+  }
+
+  if (error) {
+    console.error(`[Profile Provisioning] Failed for user ${userId}:`, error.message);
+    return false;
+  }
+
+  markProfileEnsured(userId);
+  return true;
+};
+
+const ensureProfilesExist = async (userIds, options = {}) => {
+  const { retries = 1, retryDelayMs = 150 } = options;
+  const uniqueIds = [...new Set((userIds || []).filter(Boolean))];
+  if (uniqueIds.length === 0) return false;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const results = await Promise.all(uniqueIds.map((id) => ensureProfileExists(id)));
+    if (results.every(Boolean)) return true;
+
+    if (attempt < retries) {
+      await sleep(retryDelayMs * (attempt + 1));
+    }
+  }
+
+  return false;
+};
+
 /**
  * Server-Side Referee: Start timer for a specific room
  */
@@ -982,6 +1045,19 @@ io.use(async (socket, next) => {
       return next(new Error('Authentication Error: Invalid or expired token.'));
     }
     socket.verifiedUserId = user.id;
+
+    // Non-blocking profile provisioning keeps auth snappy while still healing missing profiles.
+    const usernameHint = user.user_metadata?.username || user.email?.split('@')[0] || null;
+    void ensureProfileExists(user.id, usernameHint)
+      .then((ok) => {
+        if (!ok) {
+          console.warn(`[Profile Provisioning] Deferred provisioning failed for ${user.id}`);
+        }
+      })
+      .catch((profileErr) => {
+        console.error('[Profile Provisioning] Deferred provisioning error:', profileErr.message || profileErr);
+      });
+
     next();
   } catch (err) {
     next(new Error('Authentication Error: Internal verification failure.'));
@@ -1077,23 +1153,34 @@ io.on('connection', (socket) => {
       let roomId = generateRoomId();
       let isTransient = false;
 
-      try {
-        const { data, error } = await withTimeout(supabase.from('matches').insert({
-          id: roomId,
-          topic: topicTitle,
-          topic_title: topicTitle,
-          status: 'active',
-          critic_id: critic.userId,
-          defender_id: defender.userId
-        }).select().single(), 10000);
+      const profilesReady = await ensureProfilesExist([critic.userId, defender.userId], {
+        retries: 2,
+        retryDelayMs: 200
+      });
+      if (!profilesReady) {
+        console.warn('[matchmaking] Profile provisioning incomplete, match will be transient.');
+        isTransient = true;
+      }
 
-        if (error) {
-          console.warn('[matchmaking] DB Insert failed, match will be transient:', error.message);
+      if (!isTransient) {
+        try {
+          const { data, error } = await withTimeout(supabase.from('matches').insert({
+            id: roomId,
+            topic: topicTitle,
+            topic_title: topicTitle,
+            status: 'active',
+            critic_id: critic.userId,
+            defender_id: defender.userId
+          }).select().single(), 10000);
+
+          if (error) {
+            console.warn('[matchmaking] DB Insert failed, match will be transient:', error.message);
+            isTransient = true;
+          }
+        } catch (err) {
+          console.error('[matchmaking] Match creation timeout, match will be transient:', err);
           isTransient = true;
         }
-      } catch (err) {
-        console.error('[matchmaking] Match creation timeout, match will be transient:', err);
-        isTransient = true;
       }
 
       // Join Room
@@ -1757,6 +1844,17 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
       const criticUserId = creatorRole === 'Critic' ? arena.creator_id : arena.joiner_id;
       const defenderUserId = creatorRole === 'Defender' ? arena.creator_id : arena.joiner_id;
 
+      const profilesReady = await ensureProfilesExist([criticUserId, defenderUserId], {
+        retries: 2,
+        retryDelayMs: 200
+      });
+      if (!profilesReady) {
+        socket.emit('private_arena_error', {
+          message: 'Finalizing player profile. Please retry in a moment.'
+        });
+        return;
+      }
+
       // Create match
       const { data: matchData, error: matchError } = await withTimeout(supabase.from('matches').insert({
         topic: arena.topic_title,
@@ -2030,6 +2128,15 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     }
 
     try {
+      const profilesReady = await ensureProfilesExist([challengerId, challengedId], {
+        retries: 2,
+        retryDelayMs: 200
+      });
+      if (!profilesReady) {
+        socket.emit('challenge_error', { message: 'Profile sync in progress. Please try again in a few seconds.' });
+        return;
+      }
+
       const arenaCode = generateArenaCode();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
@@ -2242,6 +2349,17 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           else { critic = p2; defender = p1; }
         }
 
+        const profilesReady = await ensureProfilesExist([critic.userId, defender.userId], {
+          retries: 2,
+          retryDelayMs: 200
+        });
+        if (!profilesReady) {
+          io.to(`challenge_${challengeId}`).emit('challenge_error', {
+            message: 'Finalizing player profiles. Please re-enter the arena in a few seconds.'
+          });
+          return;
+        }
+
         // Create match in DB
         let roomId;
         try {
@@ -2439,6 +2557,14 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
       }
       if (challengerId === targetUserId) {
         return socket.emit('challenge_error', { message: 'You cannot challenge yourself.' });
+      }
+
+      const profilesReady = await ensureProfilesExist([challengerId, targetUserId], {
+        retries: 2,
+        retryDelayMs: 200
+      });
+      if (!profilesReady) {
+        return socket.emit('challenge_error', { message: 'Profile sync in progress. Please retry in a few seconds.' });
       }
 
       // Check target user exists

@@ -219,10 +219,22 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- auth.users row, preventing foreign key violations when email confirmation is enabled.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
+DECLARE
+  v_username text;
 BEGIN
-  INSERT INTO public.profiles (id, username)
-  VALUES (NEW.id, NEW.raw_user_meta_data->>'username')
-  ON CONFLICT (id) DO NOTHING;
+  v_username := NULLIF(trim(COALESCE(NEW.raw_user_meta_data->>'username', '')), '');
+
+  BEGIN
+    INSERT INTO public.profiles (id, username)
+    VALUES (NEW.id, v_username)
+    ON CONFLICT (id) DO NOTHING;
+  EXCEPTION
+    WHEN unique_violation THEN
+      INSERT INTO public.profiles (id, username)
+      VALUES (NEW.id, NULL)
+      ON CONFLICT (id) DO NOTHING;
+  END;
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
