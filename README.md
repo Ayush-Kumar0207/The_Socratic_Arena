@@ -380,9 +380,17 @@ docker compose -f observability/docker-compose.yml up -d --pull never
 
 Open Grafana at `http://localhost:3001` with `admin` / `admin`, then load the `Socratic Arena Robustness Overview` dashboard. For automatic Discord/Slack-style alerts, set `ALERT_WEBHOOK_URL` before starting Docker Compose; the independent alert relay still works if the backend crashes.
 
+### Robustness Proof
+
+The latest local evidence run combined the built-in backend robustness runner with the sibling `socratic-swarm-tester` repo. It reached 84 peak Socket.IO clients, 2 active matches, 7,220 received realtime messages, 13 emitted turns, 7 simulated drops, and 0 rage quits/reconnects.
+
+![Grafana and Prometheus robustness evidence](docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/grafana-dashboard.png)
+
+![Alertmanager evidence alert](docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/alertmanager-alerts.png)
+
 Full runbook: [`observability/README.md`](observability/README.md).
 
-Robustness proof and screenshots: [`docs/robustness/README.md`](docs/robustness/README.md).
+Robustness proof, screenshots, and raw results: [`docs/robustness/README.md`](docs/robustness/README.md).
 
 ---
 
