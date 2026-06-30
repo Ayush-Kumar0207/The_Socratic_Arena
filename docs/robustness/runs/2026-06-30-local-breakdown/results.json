@@ -1,0 +1,187 @@
+{
+  "generatedAt": "2026-06-30T07:31:34.594Z",
+  "options": {
+    "target": "http://localhost:5000",
+    "prometheus": "http://localhost:9090",
+    "outDir": "C:\\Users\\kumar\\Desktop\\The_Socratic_Arena\\docs\\robustness\\runs\\2026-06-30-local-breakdown",
+    "stages": [
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000
+    ],
+    "socketStages": [
+      25,
+      50,
+      100,
+      200,
+      400
+    ],
+    "durationSeconds": 8,
+    "latencyCeilingMs": 2000,
+    "errorCeiling": 0.05,
+    "concurrency": 2048,
+    "includeSockets": true,
+    "allowNonLocal": false
+  },
+  "stages": [
+    {
+      "type": "http",
+      "targetRps": 250,
+      "durationSeconds": 8,
+      "achievedRps": 249.875,
+      "requests": 1999,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 1564,
+        "404": 435
+      },
+      "latencyMs": {
+        "min": 0.846599999999853,
+        "p50": 2.496999999999389,
+        "p95": 14.874899999999798,
+        "p99": 32.289700000000266,
+        "max": 62.902900000000045
+      },
+      "passed": true
+    },
+    {
+      "type": "http",
+      "targetRps": 500,
+      "durationSeconds": 8,
+      "achievedRps": 499.875,
+      "requests": 3999,
+      "failures": 255,
+      "failureRate": 0.06376594148537135,
+      "statusCounts": {
+        "200": 2877,
+        "404": 867,
+        "ERR:TypeError": 255
+      },
+      "latencyMs": {
+        "min": 0.8189000000002125,
+        "p50": 187.2599999999984,
+        "p95": 2326.473299999998,
+        "p99": 3175.1682999999994,
+        "max": 3243.950100000002
+      },
+      "passed": false
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 25,
+      "durationSeconds": 8,
+      "attempts": 200,
+      "achievedHandshakesPerSecond": 25,
+      "authRejected": 200,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 357.9618999999984,
+        "p95": 1289.6474000000017,
+        "p99": 1739.4602000000014,
+        "max": 1985.7524000000012
+      },
+      "passed": true
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 50,
+      "durationSeconds": 8,
+      "attempts": 401,
+      "achievedHandshakesPerSecond": 50.125,
+      "authRejected": 401,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 10180.056700000001,
+        "p95": 15361.501399999997,
+        "p99": 16833.285099999994,
+        "max": 19240.957800000004
+      },
+      "passed": false
+    }
+  ],
+  "beforeMetrics": {
+    "processResidentMemoryBytes": 52936704,
+    "heapUsedBytes": 23505552,
+    "eventLoopLagSeconds": 0.0025033,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "afterMetrics": {
+    "processResidentMemoryBytes": 79695872,
+    "heapUsedBytes": 28429864,
+    "eventLoopLagSeconds": 0.0364483,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "postRunHealth": {
+    "ok": true,
+    "status": 200
+  },
+  "prometheus": {
+    "up": [
+      {
+        "metric": {
+          "__name__": "up",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804748.389,
+          "1"
+        ]
+      }
+    ],
+    "requestRate": [
+      {
+        "metric": {},
+        "value": [
+          1782804748.398,
+          "40.128897145652196"
+        ]
+      }
+    ],
+    "p95Latency": [
+      {
+        "metric": {},
+        "value": [
+          1782804748.405,
+          "0.02375"
+        ]
+      }
+    ],
+    "memoryBytes": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_process_resident_memory_bytes",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804748.44,
+          "164626432"
+        ]
+      }
+    ],
+    "eventLoopLag": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_nodejs_eventloop_lag_seconds",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804748.443,
+          "0.0292277"
+        ]
+      }
+    ]
+  }
+}

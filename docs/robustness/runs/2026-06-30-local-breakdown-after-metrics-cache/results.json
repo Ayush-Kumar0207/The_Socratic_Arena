@@ -1,0 +1,260 @@
+{
+  "generatedAt": "2026-06-30T08:23:07.240Z",
+  "options": {
+    "target": "http://localhost:5000",
+    "prometheus": "http://localhost:9090",
+    "outDir": "C:\\Users\\kumar\\Desktop\\The_Socratic_Arena\\docs\\robustness\\runs\\2026-06-30-local-breakdown-after-metrics-cache",
+    "stages": [
+      250,
+      500,
+      750,
+      1000,
+      1500
+    ],
+    "socketStages": [
+      25,
+      50,
+      75,
+      100
+    ],
+    "durationSeconds": 8,
+    "latencyCeilingMs": 2000,
+    "errorCeiling": 0.05,
+    "concurrency": 2048,
+    "includeSockets": true,
+    "allowNonLocal": false
+  },
+  "stages": [
+    {
+      "type": "http",
+      "targetRps": 250,
+      "durationSeconds": 8,
+      "achievedRps": 250.125,
+      "requests": 2001,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 1531,
+        "404": 470
+      },
+      "latencyMs": {
+        "min": 0.5757000000003245,
+        "p50": 2.232099999999946,
+        "p95": 5.00800000000072,
+        "p99": 11.295399999999972,
+        "max": 33.94210000000001
+      },
+      "passed": true
+    },
+    {
+      "type": "http",
+      "targetRps": 500,
+      "durationSeconds": 8,
+      "achievedRps": 500,
+      "requests": 4000,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 3148,
+        "404": 852
+      },
+      "latencyMs": {
+        "min": 0.4202999999997701,
+        "p50": 2.081500000000233,
+        "p95": 9.57049999999981,
+        "p99": 23.876099999999497,
+        "max": 55.09599999999955
+      },
+      "passed": true
+    },
+    {
+      "type": "http",
+      "targetRps": 750,
+      "durationSeconds": 8,
+      "achievedRps": 749.375,
+      "requests": 5995,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 4621,
+        "404": 1374
+      },
+      "latencyMs": {
+        "min": 0.38950000000113505,
+        "p50": 6.686200000000099,
+        "p95": 29.69080000000031,
+        "p99": 52.08150000000023,
+        "max": 76.1926999999996
+      },
+      "passed": true
+    },
+    {
+      "type": "http",
+      "targetRps": 1000,
+      "durationSeconds": 8,
+      "achievedRps": 760.875,
+      "requests": 6087,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 4682,
+        "404": 1405
+      },
+      "latencyMs": {
+        "min": 0.5126999999993131,
+        "p50": 987.420299999998,
+        "p95": 5956.244200000001,
+        "p99": 6153.894,
+        "max": 6311.094400000002
+      },
+      "passed": false
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 25,
+      "durationSeconds": 8,
+      "attempts": 200,
+      "achievedHandshakesPerSecond": 25,
+      "authRejected": 200,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 272.302300000003,
+        "p95": 546.884100000003,
+        "p99": 708.7419000000009,
+        "max": 970.2116999999998
+      },
+      "passed": true
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 50,
+      "durationSeconds": 8,
+      "attempts": 400,
+      "achievedHandshakesPerSecond": 50,
+      "authRejected": 400,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 270.375,
+        "p95": 559.7232000000004,
+        "p99": 952.8368999999948,
+        "max": 1011.1762000000017
+      },
+      "passed": true
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 75,
+      "durationSeconds": 8,
+      "attempts": 600,
+      "achievedHandshakesPerSecond": 75,
+      "authRejected": 600,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 243.85220000000118,
+        "p95": 325.8987000000052,
+        "p99": 454.79359999999724,
+        "max": 499.41889999999694
+      },
+      "passed": true
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 100,
+      "durationSeconds": 8,
+      "attempts": 801,
+      "achievedHandshakesPerSecond": 100.125,
+      "authRejected": 801,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 242.14489999999932,
+        "p95": 284.2014999999956,
+        "p99": 394.64100000000326,
+        "max": 620.2942000000039
+      },
+      "passed": true
+    }
+  ],
+  "beforeMetrics": {
+    "processResidentMemoryBytes": 35958784,
+    "heapUsedBytes": 25662496,
+    "eventLoopLagSeconds": 0.0015572,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "afterMetrics": {
+    "processResidentMemoryBytes": 176816128,
+    "heapUsedBytes": 43234936,
+    "eventLoopLagSeconds": 0.0657893,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "postRunHealth": {
+    "ok": true,
+    "status": 200
+  },
+  "prometheus": {
+    "up": [
+      {
+        "metric": {
+          "__name__": "up",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782807867.031,
+          "1"
+        ]
+      }
+    ],
+    "requestRate": [
+      {
+        "metric": {},
+        "value": [
+          1782807867.047,
+          "134.72938251922525"
+        ]
+      }
+    ],
+    "p95Latency": [
+      {
+        "metric": {},
+        "value": [
+          1782807867.057,
+          "0.02375"
+        ]
+      }
+    ],
+    "memoryBytes": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_process_resident_memory_bytes",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782807867.113,
+          "173924352"
+        ]
+      }
+    ],
+    "eventLoopLag": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_nodejs_eventloop_lag_seconds",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782807867.117,
+          "0.0772309"
+        ]
+      }
+    ]
+  }
+}

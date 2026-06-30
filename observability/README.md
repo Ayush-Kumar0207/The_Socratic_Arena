@@ -83,6 +83,21 @@ Use these as proof-of-robustness screenshots in GitHub:
 3. Prometheus alerts page showing configured alert rules
 4. Alertmanager page showing active or resolved alerts
 5. Raw `/metrics` output showing `socratic_arena_*` metrics
+
+The latest completed breakdown report with embedded screenshots is in:
+
+```text
+docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/SUMMARY.md
+```
+
+The reproducible local load runner is:
+
+```text
+tools/robustness/breakdown-runner.mjs
+```
+
+See the full robustness evidence page: [`docs/robustness/README.md`](../docs/robustness/README.md).
+
 ## Troubleshooting
 
 ### Backend says `EADDRINUSE :5000`

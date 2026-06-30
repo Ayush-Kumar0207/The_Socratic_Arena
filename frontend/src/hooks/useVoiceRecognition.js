@@ -74,6 +74,64 @@ const LOOK_BEHIND_WINDOW = 5;
 /** Energy spike threshold — command must be ≥15% louder than baseline. */
 const ENERGY_SPIKE_THRESHOLD = 0.15;
 
+/** Wait briefly so the browser can merge nearby final fragments before we commit text. */
+const FINAL_COMMIT_DELAY_MS = 650;
+
+/** Ask the browser for alternatives when available, then choose the strongest one. */
+const MAX_RECOGNITION_ALTERNATIVES = 5;
+/** Free STT defaults: local faster-whisper first, browser SpeechRecognition fallback. */
+const BACKEND_API_BASE = import.meta.env.VITE_BACKEND_URL
+  ? `${import.meta.env.VITE_BACKEND_URL}/api`
+  : 'http://localhost:5000/api';
+const FREE_STT_DIRECT_URL = (import.meta.env.VITE_FREE_STT_URL || 'http://127.0.0.1:5055').replace(/\/+$/, '');
+const FREE_STT_MODE = import.meta.env.VITE_FREE_STT_MODE || 'auto';
+const FREE_STT_CHUNK_MS = Number(import.meta.env.VITE_FREE_STT_CHUNK_MS || 4200);
+const FREE_STT_STATUS_TIMEOUT_MS = Number(import.meta.env.VITE_FREE_STT_STATUS_TIMEOUT_MS || 1200);
+const FREE_STT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_FREE_STT_REQUEST_TIMEOUT_MS || 45000);
+
+/** Debate-domain phrases used for grammar hints, ranking, and autocorrection. */
+const VOICE_CONTEXTUAL_PHRASES = [
+  'Socratic Arena', 'Gemini AI', 'AI judge', 'raise objection', 'summon judge',
+  'send argument', 'post argument', 'end turn', 'clear draft', 'critic', 'defender',
+  'premise', 'conclusion', 'evidence', 'logical fallacy', 'ad hominem', 'straw man',
+  'false dilemma', 'slippery slope', 'hasty generalization', 'burden of proof',
+  'appeal to authority', 'appeal to popularity', 'correlation causation', 'Elo rating',
+  'vegetarian', 'non vegetarian', 'non-veg', 'WebGPU', 'WebRTC', 'Prometheus', 'Grafana'
+];
+
+const COMMON_SPEECH_REPLACEMENTS = [
+  [/\bgem and i\b/gi, 'Gemini'],
+  [/\bgemini a\s*i\b/gi, 'Gemini AI'],
+  [/\ba\s*i judge\b/gi, 'AI judge'],
+  [/\bsocratic a?rena\b/gi, 'Socratic Arena'],
+  [/\badd hominem\b/gi, 'ad hominem'],
+  [/\bat hominem\b/gi, 'ad hominem'],
+  [/\bstrawman\b/gi, 'straw man'],
+  [/\bslippery slow\b/gi, 'slippery slope'],
+  [/\bhaste generalization\b/gi, 'hasty generalization'],
+  [/\bburden off proof\b/gi, 'burden of proof'],
+  [/\bappeal two authority\b/gi, 'appeal to authority'],
+  [/\bappeal two popularity\b/gi, 'appeal to popularity'],
+  [/\bcorrelation cause asian\b/gi, 'correlation causation'],
+  [/\bnon veg\b/gi, 'non-veg'],
+  [/\belo\b/gi, 'Elo'],
+  [/\bweb gpu\b/gi, 'WebGPU'],
+  [/\bweb rtc\b/gi, 'WebRTC'],
+  [/\bpromethius\b/gi, 'Prometheus'],
+  [/\bpromethious\b/gi, 'Prometheus'],
+  [/\bgraffana\b/gi, 'Grafana'],
+  [/\bsend are given\b/gi, 'send argument'],
+  [/\bsend the argument\b/gi, 'send argument'],
+  [/\bpost are given\b/gi, 'post argument'],
+  [/\bend term\b/gi, 'end turn'],
+  [/\bclear draught\b/gi, 'clear draft'],
+  [/\braise an objection\b/gi, 'raise objection'],
+  [/\bsummon the judge\b/gi, 'summon judge'],
+  [/\bsome in judge\b/gi, 'summon judge'],
+  [/\ba\s*i\b/g, 'AI'],
+  [/\ba\s*p\s*i\b/g, 'API']
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // § 2b: AFFECTIVE PUNCTUATION CONSTANTS
 // Thresholds and patterns for the Pragmatic Affective Punctuation layer.
@@ -308,6 +366,164 @@ const SpeechRecognitionAPI = typeof window !== 'undefined'
   ? (window.SpeechRecognition || window.webkitSpeechRecognition)
   : null;
 
+const normalizeRecognizedSpeech = (text = '') => {
+  let cleaned = String(text)
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .trim();
+
+  COMMON_SPEECH_REPLACEMENTS.forEach(([pattern, replacement]) => {
+    cleaned = cleaned.replace(pattern, replacement);
+  });
+
+  return cleaned.replace(/\s+/g, ' ').trim();
+};
+
+const candidateScore = (candidate) => {
+  const transcript = normalizeRecognizedSpeech(candidate?.transcript || '');
+  if (!transcript) return -Infinity;
+
+  const lower = transcript.toLowerCase();
+  const confidence = Number.isFinite(candidate?.confidence) && candidate.confidence > 0
+    ? candidate.confidence
+    : 0.55;
+
+  const domainBoost = VOICE_CONTEXTUAL_PHRASES.reduce((score, phrase) => (
+    lower.includes(phrase.toLowerCase()) ? score + 0.08 : score
+  ), 0);
+
+  const triggerBoost = TRIGGER_LIST.reduce((score, { phrase }) => (
+    lower.includes(phrase) ? score + 0.18 : score
+  ), 0);
+
+  const noisePenalty = /(.)\1{4,}/.test(lower) ? 0.15 : 0;
+  return confidence + domainBoost + triggerBoost - noisePenalty;
+};
+
+const selectBestAlternative = (result) => {
+  const alternatives = [];
+  const count = Math.min(result?.length || 0, MAX_RECOGNITION_ALTERNATIVES);
+  for (let i = 0; i < count; i++) alternatives.push(result[i]);
+
+  const best = alternatives.sort((a, b) => candidateScore(b) - candidateScore(a))[0];
+  return {
+    text: normalizeRecognizedSpeech(best?.transcript || ''),
+    confidence: Number.isFinite(best?.confidence) ? best.confidence : 0,
+  };
+};
+
+const getPreferredSpeechLanguage = () => {
+  if (typeof window === 'undefined') return 'en-US';
+  const saved = window.localStorage?.getItem('socratic_voice_lang');
+  if (saved) return saved;
+  const browserLanguage = navigator.language || 'en-US';
+  return browserLanguage.toLowerCase().startsWith('en') ? browserLanguage : 'en-US';
+};
+
+const installSpeechHints = (recognition) => {
+  if (typeof window === 'undefined' || !recognition) return;
+
+  const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+  if (SpeechGrammarList) {
+    try {
+      const grammar = `#JSGF V1.0; grammar socratic; public <term> = ${VOICE_CONTEXTUAL_PHRASES.join(' | ')} ;`;
+      const speechRecognitionList = new SpeechGrammarList();
+      speechRecognitionList.addFromString(grammar, 1);
+      recognition.grammars = speechRecognitionList;
+    } catch (err) {
+      console.warn('[Voice] Speech grammar hints unavailable:', err.message);
+    }
+  }
+
+  try {
+    if ('phrases' in recognition) {
+      recognition.phrases = VOICE_CONTEXTUAL_PHRASES.map((phrase) => ({ phrase, boost: 8 }));
+    }
+  } catch (err) {
+    console.warn('[Voice] Contextual phrase hints unavailable:', err.message);
+  }
+};
+const canUseFreeSttRecorder = () => (
+  typeof window !== 'undefined'
+  && typeof window.MediaRecorder !== 'undefined'
+  && !!navigator.mediaDevices?.getUserMedia
+);
+
+const getRecorderMimeType = () => {
+  if (typeof window === 'undefined' || !window.MediaRecorder?.isTypeSupported) return '';
+
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ];
+
+  return candidates.find((type) => window.MediaRecorder.isTypeSupported(type)) || '';
+};
+
+const fetchJsonWithTimeout = async (url, options = {}, timeoutMs = FREE_STT_STATUS_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const discoverFreeSttEndpoint = async () => {
+  if (FREE_STT_MODE === 'browser' || !canUseFreeSttRecorder()) return null;
+
+  if (FREE_STT_MODE !== 'backend') {
+    try {
+      const { response, payload } = await fetchJsonWithTimeout(
+        `${FREE_STT_DIRECT_URL}/health`,
+        { method: 'GET' },
+        FREE_STT_STATUS_TIMEOUT_MS
+      );
+
+      if (response.ok && payload?.healthy !== false) {
+        return {
+          mode: 'direct-local',
+          healthUrl: `${FREE_STT_DIRECT_URL}/health`,
+          transcribeUrl: `${FREE_STT_DIRECT_URL}/transcribe`,
+          engine: payload.engine || 'faster-whisper',
+          model: payload.model || 'unknown',
+        };
+      }
+    } catch (err) {
+      console.info('[Voice:FreeSTT] Direct local service unavailable:', err.message);
+    }
+  }
+
+  if (FREE_STT_MODE !== 'direct') {
+    try {
+      const { response, payload } = await fetchJsonWithTimeout(
+        `${BACKEND_API_BASE}/stt/status`,
+        { method: 'GET' },
+        FREE_STT_STATUS_TIMEOUT_MS
+      );
+
+      if (response.ok && payload?.enabled && payload?.healthy) {
+        return {
+          mode: 'backend-proxy',
+          healthUrl: `${BACKEND_API_BASE}/stt/status`,
+          transcribeUrl: `${BACKEND_API_BASE}/stt/transcribe`,
+          engine: payload.engine || 'faster-whisper',
+          model: payload.model || 'unknown',
+        };
+      }
+    } catch (err) {
+      console.info('[Voice:FreeSTT] Backend STT proxy unavailable:', err.message);
+    }
+  }
+
+  return null;
+};
 export default function useVoiceRecognition({
   onSubmit = () => {},
   onClear = () => {},
@@ -321,7 +537,7 @@ export default function useVoiceRecognition({
   const [audioStream, setAudioStream] = useState(null);
   const [volume, setVolume] = useState(0); // New: Direct volume stream for VoiceOrb
   const [error, setError] = useState(null);
-  const [isSupported] = useState(!!SpeechRecognitionAPI);
+  const [isSupported] = useState(() => !!SpeechRecognitionAPI || canUseFreeSttRecorder());
 
   // ── Refs: Core engine state (NO re-renders, NO stale closures) ──
   const recognitionRef = useRef(null);
@@ -329,6 +545,15 @@ export default function useVoiceRecognition({
   const streamRef = useRef(null);
   const restartTimerRef = useRef(null);
   const noResultRestartTimerRef = useRef(null);
+  const finalCommitTimerRef = useRef(null);
+  const pendingFinalChunksRef = useRef([]);
+  const mediaRecorderRef = useRef(null);
+  const localSttEndpointRef = useRef(null);
+  const localSttModeRef = useRef(false);
+  const localSttStoppingRef = useRef(false);
+  const localSttChunkCounterRef = useRef(0);
+  const localSttAbortControllerRef = useRef(null);
+  const localSttQueueRef = useRef(Promise.resolve());
   const volumeAnimationRef = useRef(null); // New: Animation loop for volume
   const linguisticPulseRef = useRef(0); // New: For simulated volume on iOS
   
@@ -474,11 +699,12 @@ export default function useVoiceRecognition({
    *
    * @param {string} rawText - The raw transcript string from the speech engine.
    */
-  const processIncomingChunk = useCallback((rawText) => {
-    if (!rawText || isCommandLockActiveRef.current) return;
+  const processIncomingChunk = useCallback((rawText, recognitionMeta = {}) => {
+    const correctedText = normalizeRecognizedSpeech(rawText);
+    if (!correctedText || isCommandLockActiveRef.current) return;
 
     const now = Date.now();
-    const normalizedText = rawText.toLowerCase().trim();
+    const normalizedText = correctedText.toLowerCase().trim();
     const words = normalizedText.split(/\s+/).filter(Boolean);
 
     // ══════════════════════════════════════════════════════════════════════
@@ -524,8 +750,8 @@ export default function useVoiceRecognition({
 
     if (!triggerResult) {
       // ── No trigger found: Pure dictation. Run Affective Engine. ──
-      const { text: punctuatedText, tone } = analyzeTextTone(rawText, punctuationMetrics);
-      console.log(`[Voice:P2] No trigger. Dictation: "${punctuatedText}" [Tone: ${tone}]`);
+      const { text: punctuatedText, tone } = analyzeTextTone(correctedText, { ...punctuationMetrics, confidence: recognitionMeta.confidence || 0 });
+      console.log(`[Voice:P2] No trigger. Dictation: "${punctuatedText}" [Tone: ${tone}] confidence=${(recognitionMeta.confidence || 0).toFixed(2)}`);
       onTranscriptChunkRef.current({ text: punctuatedText, tone });
       return;
     }
@@ -552,7 +778,7 @@ export default function useVoiceRecognition({
         `Treating "${phrase}" as dictation.`
       );
       isCommandLockActiveRef.current = false;
-      const { text: punctuatedText, tone } = analyzeTextTone(rawText, punctuationMetrics);
+      const { text: punctuatedText, tone } = analyzeTextTone(correctedText, { ...punctuationMetrics, confidence: recognitionMeta.confidence || 0 });
       onTranscriptChunkRef.current({ text: punctuatedText, tone });
       return;
     }
@@ -581,7 +807,7 @@ export default function useVoiceRecognition({
         `Treating "${phrase}" as dictation.`
       );
       isCommandLockActiveRef.current = false;
-      const { text: punctuatedText, tone } = analyzeTextTone(rawText, punctuationMetrics);
+      const { text: punctuatedText, tone } = analyzeTextTone(correctedText, { ...punctuationMetrics, confidence: recognitionMeta.confidence || 0 });
       onTranscriptChunkRef.current({ text: punctuatedText, tone });
       return;
     }
@@ -623,9 +849,9 @@ export default function useVoiceRecognition({
 
     // If there was dictation text before the trigger, punctuate and emit it first
     if (textBeforeTrigger) {
-      const originalCasePrefix = rawText.slice(0, triggerIndex).trim();
+      const originalCasePrefix = correctedText.slice(0, triggerIndex).trim();
       if (originalCasePrefix) {
-        const { text: punctuatedText, tone } = analyzeTextTone(originalCasePrefix, punctuationMetrics);
+        const { text: punctuatedText, tone } = analyzeTextTone(normalizeRecognizedSpeech(originalCasePrefix), { ...punctuationMetrics, confidence: recognitionMeta.confidence || 0 });
         onTranscriptChunkRef.current({ text: punctuatedText, tone });
       }
     }
@@ -656,6 +882,41 @@ export default function useVoiceRecognition({
       masterTranscriptBufferRef.current.slice(0, bufLen - triggerWords.length);
 
   }, [getEnergyMetrics]);
+
+  const flushFinalBuffer = useCallback(() => {
+    if (finalCommitTimerRef.current) {
+      clearTimeout(finalCommitTimerRef.current);
+      finalCommitTimerRef.current = null;
+    }
+
+    const chunks = pendingFinalChunksRef.current;
+    pendingFinalChunksRef.current = [];
+    if (!chunks.length) return;
+
+    const mergedText = normalizeRecognizedSpeech(chunks.map((chunk) => chunk.text).join(' '));
+    const confidenceSamples = chunks
+      .map((chunk) => chunk.confidence)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const averageConfidence = confidenceSamples.length
+      ? confidenceSamples.reduce((sum, value) => sum + value, 0) / confidenceSamples.length
+      : 0;
+
+    if (!mergedText) return;
+    console.log(`[Voice] Final Buffer Committed: "${mergedText}" confidence=${averageConfidence.toFixed(2)}`);
+    processIncomingChunk(mergedText, { confidence: averageConfidence });
+  }, [processIncomingChunk]);
+
+  const queueFinalChunks = useCallback((chunks) => {
+    const normalizedChunks = chunks
+      .map((chunk) => ({ ...chunk, text: normalizeRecognizedSpeech(chunk.text) }))
+      .filter((chunk) => chunk.text);
+
+    if (!normalizedChunks.length) return;
+    pendingFinalChunksRef.current.push(...normalizedChunks);
+
+    if (finalCommitTimerRef.current) clearTimeout(finalCommitTimerRef.current);
+    finalCommitTimerRef.current = setTimeout(flushFinalBuffer, FINAL_COMMIT_DELAY_MS);
+  }, [flushFinalBuffer]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // § 6: RECOGNITION ENGINE LIFECYCLE
@@ -784,6 +1045,108 @@ export default function useVoiceRecognition({
     }
   }, [sampleCurrentEnergy]);
 
+  const submitLocalSttChunk = useCallback(async (audioBlob, chunkId) => {
+    const endpoint = localSttEndpointRef.current;
+    if (!endpoint || (!localSttModeRef.current && !localSttStoppingRef.current) || !audioBlob?.size) return;
+
+    const controller = new AbortController();
+    localSttAbortControllerRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), FREE_STT_REQUEST_TIMEOUT_MS);
+
+    try {
+      const formData = new FormData();
+      const mimeType = audioBlob.type || 'audio/webm';
+      const extension = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'm4a' : 'webm';
+      formData.append('audio', audioBlob, `socratic-${Date.now()}-${chunkId}.${extension}`);
+      formData.append('language', getPreferredSpeechLanguage().split('-')[0] || 'en');
+
+      const response = await fetch(endpoint.transcribeUrl, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.message || payload.detail || `STT failed with ${response.status}`);
+      }
+
+      const text = normalizeRecognizedSpeech(payload.text || '');
+      if (!text) return;
+
+      hasReceivedSpeechRef.current = true;
+      lastResultTimestampRef.current = Date.now();
+      setError(null);
+      setInterimText(text);
+      queueFinalChunks([{ text, confidence: payload.confidence || 0.85 }]);
+      console.log(`[Voice:FreeSTT] ${endpoint.mode}/${endpoint.engine} chunk ${chunkId}: "${text}"`);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.warn('[Voice:FreeSTT] Chunk transcription failed:', err.message);
+        setError('Local STT paused. Browser fallback will be used next time.');
+      }
+    } finally {
+      clearTimeout(timeout);
+      if (localSttAbortControllerRef.current === controller) {
+        localSttAbortControllerRef.current = null;
+      }
+    }
+  }, [queueFinalChunks]);
+
+  const startLocalSttRecorder = useCallback((stream, endpoint) => {
+    if (!canUseFreeSttRecorder()) return false;
+
+    const mimeType = getRecorderMimeType();
+    const recorderOptions = mimeType ? { mimeType } : undefined;
+    const recorder = new MediaRecorder(stream, recorderOptions);
+
+    localSttEndpointRef.current = endpoint;
+    localSttModeRef.current = true;
+    localSttStoppingRef.current = false;
+    localSttChunkCounterRef.current = 0;
+    localSttQueueRef.current = Promise.resolve();
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (event) => {
+      if ((!localSttModeRef.current && !localSttStoppingRef.current) || !event.data?.size) return;
+      if (event.data.size < 800) return;
+
+      const chunkId = ++localSttChunkCounterRef.current;
+      localSttQueueRef.current = localSttQueueRef.current
+        .then(() => submitLocalSttChunk(event.data, chunkId))
+        .catch((err) => console.warn('[Voice:FreeSTT] Queue error:', err.message));
+    };
+
+    recorder.onerror = (event) => {
+      console.warn('[Voice:FreeSTT] Recorder error:', event.error?.message || event.error || event);
+      setError('Local STT recorder failed. Please restart voice input.');
+    };
+
+    recorder.onstop = () => {
+      localSttModeRef.current = false;
+      localSttStoppingRef.current = false;
+      mediaRecorderRef.current = null;
+    };
+
+    recorder.start(FREE_STT_CHUNK_MS);
+    console.log(`[Voice:FreeSTT] Started ${endpoint.mode} recorder (${endpoint.engine}/${endpoint.model})`);
+    return true;
+  }, [submitLocalSttChunk]);
+
+  const stopLocalSttRecorder = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      localSttStoppingRef.current = true;
+      try { recorder.requestData(); } catch (e) { /* noop */ }
+      try { recorder.stop(); } catch (e) { /* noop */ }
+    }
+
+    if (localSttAbortControllerRef.current) {
+      localSttAbortControllerRef.current.abort();
+      localSttAbortControllerRef.current = null;
+    }
+  }, []);
+
   /** Create a fresh SpeechRecognition instance and start listening. */
   const createAndStartRecognition = useCallback(() => {
     if (!SpeechRecognitionAPI || !isListeningRef.current) return;
@@ -800,8 +1163,9 @@ export default function useVoiceRecognition({
     // On iOS, if supported, continuous tends to hold the session better.
     recognition.continuous = isIOS;
     recognition.interimResults = true;
-    recognition.lang = navigator.language || 'en-US';
-    recognition.maxAlternatives = 1;
+    recognition.lang = getPreferredSpeechLanguage();
+    recognition.maxAlternatives = MAX_RECOGNITION_ALTERNATIVES;
+    installSpeechHints(recognition);
     recognitionRef.current = recognition;
 
     // ── onstart: Session opened ──
@@ -869,27 +1233,29 @@ export default function useVoiceRecognition({
         clearTimeout(noResultRestartTimerRef.current);
         noResultRestartTimerRef.current = null;
       }
+
       setError(null);
       
       let interimTranscript = '';
-      let finalChunk = '';
+      const finalChunks = [];
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
+        const bestAlternative = selectBestAlternative(result);
         if (result.isFinal) {
-          finalChunk += result[0].transcript;
+          if (bestAlternative.text) finalChunks.push(bestAlternative);
         } else {
-          interimTranscript += result[0].transcript;
+          interimTranscript += bestAlternative.text ? `${bestAlternative.text} ` : '';
         }
       }
 
       // Update interim preview (for UI display only — no buffer mutation)
-      setInterimText(interimTranscript);
+      setInterimText(normalizeRecognizedSpeech(interimTranscript));
 
-      // On finalized chunk → run the full Acoustic-Semantic Lock pipeline
-      if (finalChunk) {
-        console.log('[Voice] Final Chunk Received:', finalChunk);
-        processIncomingChunk(finalChunk);
+      // On finalized chunks, wait briefly and merge nearby fragments before processing.
+      if (finalChunks.length > 0) {
+        console.log('[Voice] Final Chunk Queued:', finalChunks.map((chunk) => `${chunk.text} (${(chunk.confidence || 0).toFixed(2)})`).join(' | '));
+        queueFinalChunks(finalChunks);
       }
     };
 
@@ -922,11 +1288,17 @@ export default function useVoiceRecognition({
     // ── onend: Auto-restart without resetting the buffer ──
     recognition.onend = () => {
       console.log('[Voice] Session Ended. Restarting...');
+      flushFinalBuffer();
       setInterimText('');
       if (noResultRestartTimerRef.current) {
         clearTimeout(noResultRestartTimerRef.current);
         noResultRestartTimerRef.current = null;
       }
+      if (finalCommitTimerRef.current) {
+        clearTimeout(finalCommitTimerRef.current);
+        finalCommitTimerRef.current = null;
+      }
+      pendingFinalChunksRef.current = [];
 
       // CRITICAL: We do NOT reset masterTranscriptBufferRef or
       // lastSpeechTimestampRef here. The rolling buffer must persist
@@ -955,7 +1327,7 @@ export default function useVoiceRecognition({
         if (isListeningRef.current) createAndStartRecognition();
       }, retryDelay);
     }
-  }, [killRecognition, processIncomingChunk]);
+  }, [killRecognition, queueFinalChunks, flushFinalBuffer]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // § 7: PUBLIC API
@@ -964,9 +1336,11 @@ export default function useVoiceRecognition({
   /** Stop recognition, release mic, but preserve the buffer for session continuity. */
   const stopListeningFn = useCallback(() => {
     console.log('[Voice] Manual Stop 🛑');
+    flushFinalBuffer();
     isListeningRef.current = false;
     setIsListening(false);
     setInterimText('');
+    localSttEndpointRef.current = null;
     
     // Clear speech check timer
     if (speechCheckTimerRef.current) {
@@ -974,13 +1348,14 @@ export default function useVoiceRecognition({
       speechCheckTimerRef.current = null;
     }
     
+    stopLocalSttRecorder();
     killRecognition();
     releaseStream();
-  }, [killRecognition, releaseStream]);
+  }, [flushFinalBuffer, stopLocalSttRecorder, killRecognition, releaseStream]);
 
   /** Toggle listening — request mic permission on first activation. */
   const startListening = useCallback(async () => {
-    if (!SpeechRecognitionAPI || !enabled) return;
+    if (!enabled) return;
 
     // Toggle off if already listening
     if (isListeningRef.current) {
@@ -994,9 +1369,52 @@ export default function useVoiceRecognition({
     hasReceivedSpeechRef.current = false;
     lastResultTimestampRef.current = 0;
 
+    // Reset the Acoustic-Semantic Lock state for a fresh session
+    masterTranscriptBufferRef.current = [];
+    lastSpeechTimestampRef.current = 0;
+    isCommandLockActiveRef.current = false;
+    energySamplesRef.current = [];
+
+    const freeSttEndpoint = await discoverFreeSttEndpoint();
+    if (freeSttEndpoint) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            autoGainControl: true,
+            echoCancellation: true,
+            noiseSuppression: true,
+            channelCount: 1,
+          },
+        });
+
+        streamRef.current = stream;
+        setAudioStream(stream);
+        isListeningRef.current = true;
+        setIsListening(true);
+        initAudioAnalysis(stream);
+
+        if (startLocalSttRecorder(stream, freeSttEndpoint)) {
+          console.log(`[Voice] High-accuracy free STT active via ${freeSttEndpoint.mode}.`);
+          return;
+        }
+
+        throw new Error('MediaRecorder could not start');
+      } catch (err) {
+        console.warn('[Voice:FreeSTT] Falling back to browser recognition:', err.message);
+        stopLocalSttRecorder();
+        releaseStream();
+        isListeningRef.current = false;
+        setIsListening(false);
+      }
+    }
+
+    if (!SpeechRecognitionAPI) {
+      setError('Start the free local STT service, or use a browser with speech recognition support.');
+      return;
+    }
+
     // MOBILE FIX: Detect if we're on mobile for platform-specific handling
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     // IMPORTANT: On many mobile browsers, holding a parallel getUserMedia stream
     // can starve SpeechRecognition (mic contention). Let SpeechRecognition own mic.
@@ -1037,17 +1455,10 @@ export default function useVoiceRecognition({
       setVolume(0.15);
     }
 
-    // Reset the Acoustic-Semantic Lock state for a fresh session
-    masterTranscriptBufferRef.current = [];
-    lastSpeechTimestampRef.current = 0;
-    isCommandLockActiveRef.current = false;
-    energySamplesRef.current = [];
-
     isListeningRef.current = true;
     setIsListening(true);
     createAndStartRecognition();
-  }, [enabled, stopListeningFn, createAndStartRecognition, initAudioAnalysis]);
-
+  }, [enabled, stopListeningFn, initAudioAnalysis, startLocalSttRecorder, stopLocalSttRecorder, releaseStream, createAndStartRecognition]);
   // ── Lifecycle cleanup ──
   useEffect(() => {
     return () => {
@@ -1062,7 +1473,13 @@ export default function useVoiceRecognition({
         clearTimeout(noResultRestartTimerRef.current);
         noResultRestartTimerRef.current = null;
       }
+      if (finalCommitTimerRef.current) {
+        clearTimeout(finalCommitTimerRef.current);
+        finalCommitTimerRef.current = null;
+      }
+      pendingFinalChunksRef.current = [];
       
+      stopLocalSttRecorder();
       killRecognition();
       if (audioSourceRef.current) {
         try { audioSourceRef.current.disconnect(); } catch (e) { /* noop */ }
@@ -1074,7 +1491,7 @@ export default function useVoiceRecognition({
         streamRef.current.getTracks().forEach(t => t.stop());
       }
     };
-  }, [killRecognition]);
+  }, [stopLocalSttRecorder, killRecognition]);
 
   return {
     isListening,

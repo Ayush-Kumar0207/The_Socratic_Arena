@@ -116,11 +116,13 @@ import apiRoutes from './routes/apiRoutes.js';
 
 // Import Supabase client for database operations
 import { supabase } from './lib/supabaseClient.js';
+import { analyzeCognitiveTurn, extractCognitiveInsights } from './lib/cognitiveEngine.js';
 import {
   metricsHandler,
   observeHttpRequests,
   recordAiRequest,
   recordAlertReceived,
+  recordCognitiveInsight,
   recordMatchEvent,
   recordSocketConnection,
   recordSocketEvent,
@@ -1409,6 +1411,7 @@ io.on('connection', (socket) => {
         criticTime: 300,
         defenderTime: 300,
         transcript: [],
+        cognitiveGraph: [],
         status: 'active',
         startTime: Date.now(),
         lifelines: {
@@ -1499,6 +1502,7 @@ io.on('connection', (socket) => {
         [room.players.defender]: 'Defender'
       },
       transcript: room.transcript,
+      cognitiveInsights: room.cognitiveGraph || extractCognitiveInsights(room.transcript),
       activeSpeaker: room.activeSpeaker,
       resume: true
     });
@@ -1544,24 +1548,40 @@ io.on('connection', (socket) => {
     }
 
     // Add message to transcript (including Affective Tone)
-    room.transcript.push({
+    const turnMessage = {
       id: Date.now() + Math.random().toString(36).substring(7),
       speaker: playerRole,
       text: message,
       tone: tone || 'neutral',
       timestamp: new Date().toISOString()
-    });
-    console.log(`[submit_turn] ${playerRole} submitted message [Tone: ${tone || 'neutral'}]. Transcript length: ${room.transcript.length}`);
+    };
 
-    // Swap active speaker (chess clock — timers are never reset)
+    room.transcript.push(turnMessage);
+
+    const cognitiveInsight = analyzeCognitiveTurn({
+      message: turnMessage,
+      transcript: room.transcript,
+      topic: room.topic
+    });
+    turnMessage.cognitive = cognitiveInsight;
+    if (!Array.isArray(room.cognitiveGraph)) room.cognitiveGraph = [];
+    room.cognitiveGraph.push(cognitiveInsight);
+    recordCognitiveInsight(cognitiveInsight);
+
+    console.log(`[submit_turn] ${playerRole} submitted message [Tone: ${tone || 'neutral'}]. Transcript length: ${room.transcript.length}. Cognitive risk: ${cognitiveInsight.riskScore.toFixed(2)}`);
+
+    // Swap active speaker (chess clock - timers are never reset)
     room.activeSpeaker = room.activeSpeaker === 'Critic' ? 'Defender' : 'Critic';
+
+    io.to(roomId).emit('cognitive_insight', cognitiveInsight);
 
     // Broadcast new turn to room
     console.log(`[submit_turn] Broadcasting transcript with ${room.transcript.length} messages to room ${roomId}`);
     io.to(roomId).emit('new_turn', {
       transcript: room.transcript,
       activeSpeaker: room.activeSpeaker,
-      lastSpeaker: playerRole
+      lastSpeaker: playerRole,
+      cognitiveInsight
     });
   });
 
@@ -2142,6 +2162,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
         criticTime: 300,
         defenderTime: 300,
         transcript: [],
+        cognitiveGraph: [],
         status: 'active',
         startTime: Date.now(),
         lifelines: {
@@ -2304,6 +2325,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     if (room) {
       socket.emit('spectator_sync', {
         transcript: room.transcript || [],
+        cognitiveInsights: room.cognitiveGraph || extractCognitiveInsights(room.transcript),
         criticTime: room.criticTime,
         defenderTime: room.defenderTime,
         activeSpeaker: room.activeSpeaker
@@ -2316,6 +2338,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
           // Hydrate the UI briefly so it's not a frozen empty screen
           socket.emit('spectator_sync', {
             transcript: data.transcript || [],
+            cognitiveInsights: extractCognitiveInsights(data.transcript || []),
             criticTime: 0,
             defenderTime: 0,
             activeSpeaker: 'Critic'

@@ -1,0 +1,139 @@
+{
+  "generatedAt": "2026-06-30T07:31:08.370Z",
+  "options": {
+    "target": "http://localhost:5000",
+    "prometheus": "http://localhost:9090",
+    "outDir": "C:\\Users\\kumar\\Desktop\\The_Socratic_Arena\\docs\\robustness\\runs\\smoke",
+    "stages": [
+      10
+    ],
+    "socketStages": [
+      2
+    ],
+    "durationSeconds": 3,
+    "latencyCeilingMs": 2000,
+    "errorCeiling": 0.05,
+    "concurrency": 512,
+    "includeSockets": true,
+    "allowNonLocal": false
+  },
+  "stages": [
+    {
+      "type": "http",
+      "targetRps": 10,
+      "durationSeconds": 3,
+      "achievedRps": 10,
+      "requests": 30,
+      "failures": 0,
+      "failureRate": 0,
+      "statusCounts": {
+        "200": 26,
+        "404": 4
+      },
+      "latencyMs": {
+        "min": 1.9764000000000124,
+        "p50": 3.7188000000000443,
+        "p95": 9.765499999999975,
+        "p99": 12.521399999999858,
+        "max": 12.521399999999858
+      },
+      "passed": true
+    },
+    {
+      "type": "socket-handshake",
+      "targetHandshakesPerSecond": 2,
+      "durationSeconds": 3,
+      "attempts": 6,
+      "achievedHandshakesPerSecond": 2,
+      "authRejected": 6,
+      "failures": 0,
+      "failureRate": 0,
+      "latencyMs": {
+        "p50": 309.14490000000023,
+        "p95": 798.0340999999999,
+        "p99": 798.0340999999999,
+        "max": 798.0340999999999
+      },
+      "passed": true
+    }
+  ],
+  "beforeMetrics": {
+    "processResidentMemoryBytes": 39145472,
+    "heapUsedBytes": 26477552,
+    "eventLoopLagSeconds": 0.0021842,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "afterMetrics": {
+    "processResidentMemoryBytes": 52895744,
+    "heapUsedBytes": 23052544,
+    "eventLoopLagSeconds": 0.0044303,
+    "socketConnections": 0,
+    "activeMatches": 0,
+    "waitingQueuePlayers": 0
+  },
+  "postRunHealth": {
+    "ok": true,
+    "status": 200
+  },
+  "prometheus": {
+    "up": [
+      {
+        "metric": {
+          "__name__": "up",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804677.92,
+          "1"
+        ]
+      }
+    ],
+    "requestRate": [
+      {
+        "metric": {},
+        "value": [
+          1782804677.938,
+          "0"
+        ]
+      }
+    ],
+    "p95Latency": [
+      {
+        "metric": {},
+        "value": [
+          1782804677.945,
+          "NaN"
+        ]
+      }
+    ],
+    "memoryBytes": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_process_resident_memory_bytes",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804677.951,
+          "39096320"
+        ]
+      }
+    ],
+    "eventLoopLag": [
+      {
+        "metric": {
+          "__name__": "socratic_arena_nodejs_eventloop_lag_seconds",
+          "instance": "host.docker.internal:5000",
+          "job": "socratic-arena-backend"
+        },
+        "value": [
+          1782804677.956,
+          "0.0018935"
+        ]
+      }
+    ]
+  }
+}

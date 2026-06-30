@@ -75,6 +75,23 @@ npm run dev
 
 Open `http://localhost:5173` — you're in the arena.
 
+### Free Lifetime Speech-To-Text
+
+Socratic Arena can run high-accuracy speech-to-text without paid APIs by using the local `faster-whisper` service in `stt_service/`.
+
+```powershell
+cd stt_service
+.\start.ps1
+```
+
+The frontend tries this order automatically:
+
+1. Local free STT at `http://127.0.0.1:5055`
+2. Backend proxy at `/api/stt/transcribe`
+3. Browser `SpeechRecognition` fallback
+
+This means users do not need Deepgram, Google STT, or OpenAI transcription credits. The only cost is the compute of whichever machine runs the open-source model.
+
 ---
 
 ## 📖 Table of Contents
@@ -364,6 +381,8 @@ docker compose -f observability/docker-compose.yml up -d --pull never
 Open Grafana at `http://localhost:3001` with `admin` / `admin`, then load the `Socratic Arena Robustness Overview` dashboard. For automatic Discord/Slack-style alerts, set `ALERT_WEBHOOK_URL` before starting Docker Compose; the independent alert relay still works if the backend crashes.
 
 Full runbook: [`observability/README.md`](observability/README.md).
+
+Robustness proof and screenshots: [`docs/robustness/README.md`](docs/robustness/README.md).
 
 ---
 

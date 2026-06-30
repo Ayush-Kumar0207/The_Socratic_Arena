@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { Shield, Swords, Bot, Square, Search, Users, Download, ArrowLeft, MessageCircle, Trophy, Loader2, Clock, Gavel, Scale, NotebookPen, ArrowRight, Target } from 'lucide-react';
+import { Shield, Swords, Search, MessageCircle, Loader2, Clock, Gavel, Scale, NotebookPen, ArrowRight, Target, Brain, AlertTriangle, GitBranch, Activity } from 'lucide-react';
 import jsPDF from 'jspdf';
 import useVoiceRecognition, { analyzeTextTone } from '../hooks/useVoiceRecognition';
 import VoiceOrb from './VoiceOrb';
@@ -32,6 +32,25 @@ const TypewriterMessage = ({ text, scrollToBottom, isAutoScrollEnabled, isLastMe
 
   return <div className="whitespace-pre-wrap">{displayedText}</div>;
 };
+
+const extractCognitiveInsights = (items = []) =>
+  (items || []).map((message) => message?.cognitive).filter(Boolean);
+
+const mergeCognitiveInsights = (current = [], incoming = []) => {
+  const map = new Map();
+  [...current, ...incoming].filter(Boolean).forEach((insight) => {
+    map.set(insight.id || insight.messageId, insight);
+  });
+  return Array.from(map.values()).sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+};
+
+const riskTone = (severity) => {
+  if (severity === 'high') return 'border-rose-500/40 bg-rose-950/30 text-rose-100';
+  if (severity === 'medium') return 'border-amber-500/40 bg-amber-950/25 text-amber-100';
+  return 'border-cyan-500/30 bg-cyan-950/20 text-cyan-100';
+};
+
+const riskLabel = (score = 0) => `${Math.round(Math.max(0, Math.min(1, score)) * 100)}%`;
 
 /**
  * DebateArena
@@ -82,6 +101,7 @@ const DebateArena = ({
   }, [initialStances, topic]);
 
   const [localTranscript, setLocalTranscript] = useState([]);
+  const [cognitiveInsights, setCognitiveInsights] = useState([]);
   const [inputText, setInputText] = useState('');
 
   // Voice of Reason: Scratchpad state (for off-turn voice drafts)
@@ -109,6 +129,23 @@ const DebateArena = ({
   const handleSendMessageRef = useRef(null);
   const localTranscriptRef = useRef(localTranscript);
   useEffect(() => { localTranscriptRef.current = localTranscript; }, [localTranscript]);
+
+  const cognitiveByMessageId = useMemo(() => {
+    const map = {};
+    cognitiveInsights.forEach((insight) => {
+      if (insight?.messageId) map[insight.messageId] = insight;
+    });
+    return map;
+  }, [cognitiveInsights]);
+
+  const latestCognitiveInsights = useMemo(() => cognitiveInsights.slice(-4).reverse(), [cognitiveInsights]);
+  const cognitiveSummary = useMemo(() => {
+    if (!cognitiveInsights.length) return { high: 0, medium: 0, averageRisk: 0 };
+    const high = cognitiveInsights.filter((insight) => insight.severity === 'high').length;
+    const medium = cognitiveInsights.filter((insight) => insight.severity === 'medium').length;
+    const averageRisk = cognitiveInsights.reduce((sum, insight) => sum + (insight.riskScore || 0), 0) / cognitiveInsights.length;
+    return { high, medium, averageRisk };
+  }, [cognitiveInsights]);
 
   // Voice command callbacks — use refs to always invoke the latest version
   const handleVoiceSubmit = useCallback(() => {
@@ -304,6 +341,7 @@ const DebateArena = ({
       setPlayerRole(role);
       setMatchStatus('active');
       setLocalTranscript(data.transcript || []);
+      setCognitiveInsights(data.cognitiveInsights || extractCognitiveInsights(data.transcript || []));
       setActiveSpeaker(data.activeSpeaker || 'Critic');
       setTopic(data.topic || '');
       setIsInitializing(false); // Unlock UI for transient rooms
@@ -324,15 +362,17 @@ const DebateArena = ({
       setActiveSpeaker(as);
     };
 
-    const handleNewTurn = ({ transcript: t, activeSpeaker: as }) => {
+    const handleNewTurn = ({ transcript: t, activeSpeaker: as, cognitiveInsight }) => {
       setIsAutoScrollEnabled(true); // Force auto-scroll on new message
       setLocalTranscript(t);
+      setCognitiveInsights(prev => mergeCognitiveInsights(prev, [...extractCognitiveInsights(t), cognitiveInsight].filter(Boolean)));
       setActiveSpeaker(as);
     };
 
     const handleMatchOver = ({ finalState }) => {
       setMatchStatus('finished');
       setLocalTranscript(finalState.transcript);
+      setCognitiveInsights(extractCognitiveInsights(finalState.transcript || []));
       setCriticTime(finalState.criticTime);
       setDefenderTime(finalState.defenderTime);
 
@@ -344,6 +384,7 @@ const DebateArena = ({
 
     const handleSpectatorSync = (data) => {
       setLocalTranscript(data.transcript || []);
+      setCognitiveInsights(data.cognitiveInsights || extractCognitiveInsights(data.transcript || []));
       setCriticTime(data.criticTime);
       setDefenderTime(data.defenderTime);
       setActiveSpeaker(data.activeSpeaker);
@@ -437,6 +478,10 @@ const DebateArena = ({
       setIsAutoScrollEnabled(true);
     };
 
+    const handleCognitiveInsight = (insight) => {
+      setCognitiveInsights(prev => mergeCognitiveInsights(prev, [insight]));
+    };
+
     socket.on('match_found', handleMatchFound);
     socket.on('time_sync', handleTimeSync);
     socket.on('new_turn', handleNewTurn);
@@ -452,6 +497,7 @@ const DebateArena = ({
     socket.on('ai_intervention_processing', handleAiProcessing);
     socket.on('ai_intervention_result', handleAiResult);
     socket.on('ai_intervention', handleAiResult);
+    socket.on('cognitive_insight', handleCognitiveInsight);
 
     // 🚀 PROACTIVE REJOIN: If we mount and socket is already connected, rejoin immediately
     if (socket.connected && user?.id && roomId && !isSpectator) {
@@ -475,6 +521,7 @@ const DebateArena = ({
       socket.off('ai_intervention_processing', handleAiProcessing);
       socket.off('ai_intervention_result', handleAiResult);
       socket.off('ai_intervention', handleAiResult);
+      socket.off('cognitive_insight', handleCognitiveInsight);
     };
   }, [socket, user, roomId, isSpectator]);
 
@@ -726,6 +773,48 @@ const DebateArena = ({
             </div>
           </div>
 
+          {latestCognitiveInsights.length > 0 && (
+            <div className="shrink-0 mb-3 rounded-xl border border-slate-700/60 bg-slate-900/70 px-3 py-2.5 shadow-lg shadow-slate-950/30">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Brain className="h-4 w-4 text-cyan-300 shrink-0" />
+                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.18em] text-slate-300 truncate">Cognitive Graph</span>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] sm:text-xs font-bold text-slate-400 shrink-0">
+                  <Activity className="h-3.5 w-3.5 text-emerald-300" />
+                  <span>Avg risk {riskLabel(cognitiveSummary.averageRisk)}</span>
+                  {(cognitiveSummary.high > 0 || cognitiveSummary.medium > 0) && (
+                    <span className="text-amber-300">{cognitiveSummary.high} high / {cognitiveSummary.medium} med</span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {latestCognitiveInsights.map((insight) => {
+                  const primaryFallacy = insight.fallacies?.[0];
+                  return (
+                    <div key={insight.id || insight.messageId} className={`rounded-lg border px-3 py-2 ${riskTone(insight.severity)}`}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[10px] font-black uppercase tracking-widest">{insight.speaker}</span>
+                        <span className="text-[10px] font-mono font-bold">{riskLabel(insight.riskScore)}</span>
+                      </div>
+                      <div className="flex items-start gap-2 text-xs leading-snug">
+                        {insight.contradiction ? (
+                          <GitBranch className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        ) : primaryFallacy ? (
+                          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        ) : (
+                          <Activity className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        )}
+                        <p className="line-clamp-2">
+                          {insight.contradiction?.summary || primaryFallacy?.label || `Logic ${riskLabel(insight.dimensions?.logic)} · Evidence ${riskLabel(insight.dimensions?.evidence)}`}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {/* Chat */}
           <div
             ref={chatContainerRef}
@@ -746,6 +835,9 @@ const DebateArena = ({
               <>
                 {(localTranscript || []).map((message, index) => {
                   const isMe = message?.speaker === playerRole;
+                  const cognitive = message?.cognitive || cognitiveByMessageId[message?.id];
+                  const primaryFallacy = cognitive?.fallacies?.[0];
+                  const shouldShowCognitive = cognitive && (cognitive.riskScore >= 0.32 || primaryFallacy || cognitive.contradiction);
                   return (
                     <div key={message?.id || `${message?.speaker}-${index}`}
                       className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} mb-2`}>
@@ -768,6 +860,21 @@ const DebateArena = ({
                           isLastMessage={index === localTranscript?.length - 1}
                           scrollToBottom={scrollToBottomSafe}
                         />
+
+                        {shouldShowCognitive && (
+                          <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${riskTone(cognitive.severity)}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-1.5 font-black uppercase tracking-widest text-[10px]">
+                                {cognitive.contradiction ? <GitBranch className="h-3.5 w-3.5" /> : <Brain className="h-3.5 w-3.5" />}
+                                <span>{cognitive.contradiction ? 'Premise tension' : primaryFallacy ? primaryFallacy.label : 'Cognitive signal'}</span>
+                              </div>
+                              <span className="font-mono font-bold text-[10px]">{riskLabel(cognitive.riskScore)}</span>
+                            </div>
+                            <p className="leading-relaxed opacity-90">
+                              {cognitive.contradiction?.summary || primaryFallacy?.rationale || `Logic ${riskLabel(cognitive.dimensions?.logic)} · Evidence ${riskLabel(cognitive.dimensions?.evidence)} · Relevance ${riskLabel(cognitive.dimensions?.relevance)}`}
+                            </p>
+                          </div>
+                        )}
 
                         {/* AI Judge Interventions (Result or Processing) */}
                         {objectionLoadingId === message?.id && (
