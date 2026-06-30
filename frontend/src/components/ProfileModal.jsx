@@ -103,8 +103,10 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
 
         const handleSent = (data) => {
             if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+            challengeTimeoutRef.current = null;
             setChallengStatus('sent');
-            setChallengeFeedback(`Challenge sent to ${data.target_username}!`);
+            const targetName = data?.target_username || activeUser?.username || 'user';
+            setChallengeFeedback(`Challenge sent to ${targetName}!`);
             setTimeout(() => {
                 setShowChallengeDialog(false);
                 resetChallengeState();
@@ -113,6 +115,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
 
         const handleError = (data) => {
             if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+            challengeTimeoutRef.current = null;
             setChallengStatus('error');
             setChallengeFeedback(data.message || 'Failed to send challenge.');
         };
@@ -124,9 +127,11 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             socket.off('challenge_sent', handleSent);
             socket.off('challenge_error', handleError);
         };
-    }, [socket]);
+    }, [socket, activeUser?.username]);
 
     const resetChallengeState = () => {
+        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+        challengeTimeoutRef.current = null;
         setSelectedTopic(null);
         setSelectedStance('Random');
         setChallengStatus('idle');
@@ -179,16 +184,31 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
     };
 
     const handleSendChallenge = () => {
-        if (!socket || !selectedTopic || !activeUser || challengeStatus === 'sending') return;
+        if (!socket || !activeUser?.id) {
+            setChallengStatus('error');
+            setChallengeFeedback('Connection issue. Please reopen and try again.');
+            return;
+        }
+
+        if (!selectedTopic?.id || !selectedTopic?.title) {
+            setChallengStatus('error');
+            setChallengeFeedback('Please select a valid topic.');
+            return;
+        }
+
         setChallengStatus('sending');
         setChallengeFeedback('');
+
+        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+
         socket.emit('send_challenge', {
             targetUserId: activeUser.id,
             topicId: selectedTopic.id,
             topicTitle: selectedTopic.title,
             challengerStance: selectedStance
         });
-        // Safety timeout: reset spinner if no response in 20s (accounts for Render cold starts)
+
+        // Safety timeout
         challengeTimeoutRef.current = setTimeout(() => {
             setChallengStatus('error');
             setChallengeFeedback('Server took too long to respond. Please try again.');
@@ -413,6 +433,7 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
                             <p className="text-sm font-medium text-slate-300">Live Server Connected</p>
                         </div>
                     </div>
+
                 </div>
 
                 {/* Fixed Action Footer */}

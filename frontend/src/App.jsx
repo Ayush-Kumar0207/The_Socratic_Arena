@@ -81,6 +81,7 @@ const App = () => {
     onRegisterError(error) { console.error('[PWA] SW Registration Error:', error); },
   });
 
+
   useEffect(() => {
     setStoredAppVersion(APP_VERSION);
 
@@ -154,6 +155,7 @@ const App = () => {
             socket.connect();
           }
         }
+
       } else {
         socket.disconnect();
       }
@@ -163,6 +165,7 @@ const App = () => {
       subscription?.unsubscribe();
     };
   }, []);
+
 
   if (isAuthLoading) {
     return null; // index.html skeleton spinner is already visible

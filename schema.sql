@@ -213,3 +213,33 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 7. Auto-create profile on signup via database trigger
+-- This ensures the profile row is created inside the same transaction as the
+-- auth.users row, preventing foreign key violations when email confirmation is enabled.
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+DECLARE
+  v_username text;
+BEGIN
+  v_username := NULLIF(trim(COALESCE(NEW.raw_user_meta_data->>'username', '')), '');
+
+  BEGIN
+    INSERT INTO public.profiles (id, username)
+    VALUES (NEW.id, v_username)
+    ON CONFLICT (id) DO NOTHING;
+  EXCEPTION
+    WHEN unique_violation THEN
+      INSERT INTO public.profiles (id, username)
+      VALUES (NEW.id, NULL)
+      ON CONFLICT (id) DO NOTHING;
+  END;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
