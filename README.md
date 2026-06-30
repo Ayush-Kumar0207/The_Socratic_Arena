@@ -86,6 +86,7 @@ Open `http://localhost:5173` — you're in the arena.
 - [Project Structure](#-project-structure)
 - [Environment Variables](#-environment-variables)
 - [Deployment](#-deployment)
+- [Observability](#observability)
 - [Roadmap](#-roadmap)
 - [Contributing](#-contributing)
 - [License](#-license)
@@ -343,6 +344,26 @@ cd frontend && npm install && npm run dev
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
 3. Enable Row Level Security as needed
 4. Copy your project URL and service key into `backend/.env`
+
+---
+
+## Observability
+
+The backend exposes Prometheus metrics at `GET /metrics` and a health probe at `GET /health`. A local monitoring stack is included under `observability/` with Prometheus, Grafana, and Alertmanager.
+
+```bash
+# Terminal 1: backend metrics source
+cd backend
+$env:ALERT_WEBHOOK_SECRET="local-alert-secret"
+npm run dev
+
+# Terminal 2: Prometheus + Grafana + Alertmanager
+docker compose -f observability/docker-compose.yml up
+```
+
+Open Grafana at `http://localhost:3001` with `admin` / `admin`, then load the `Socratic Arena Robustness Overview` dashboard. For automatic Discord/Slack-style alerts, set `ALERT_WEBHOOK_URL` before starting Docker Compose; the independent alert relay still works if the backend crashes.
+
+Full runbook: [`observability/README.md`](observability/README.md).
 
 ---
 

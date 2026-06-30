@@ -1,0 +1,19 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: socratic-arena-backend
+  group_by:
+    - alertname
+    - severity
+  group_wait: 15s
+  group_interval: 2m
+  repeat_interval: 30m
+
+receivers:
+  - name: socratic-arena-backend
+    webhook_configs:
+      - url: http://host.docker.internal:5000/api/alerts/prometheus?secret=local-alert-secret
+        send_resolved: true
+      - url: http://alert-relay:9088/alertmanager
+        send_resolved: true

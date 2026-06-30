@@ -1,0 +1,92 @@
+groups:
+  - name: socratic-arena-availability
+    rules:
+      - alert: SocraticArenaBackendDown
+        expr: up{job="socratic-arena-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend metrics endpoint is unreachable.
+          description: Prometheus cannot scrape the Socratic Arena backend for more than 1 minute.
+
+      - alert: SocraticArenaBackendRestarted
+        expr: changes(socratic_arena_process_start_time_seconds{job="socratic-arena-backend"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backend process restarted recently.
+          description: The Node.js backend process start time changed during the last 10 minutes.
+
+  - name: socratic-arena-performance
+    rules:
+      - alert: SocraticArenaHighHttpLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(socratic_arena_http_request_duration_seconds_bucket{job="socratic-arena-backend"}[5m]))) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: HTTP p95 latency is above 2 seconds.
+          description: Backend HTTP requests are slower than expected for at least 3 minutes.
+
+      - alert: SocraticArenaHighHttpErrorRate
+        expr: |
+          (
+            sum(rate(socratic_arena_http_requests_total{job="socratic-arena-backend",status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(socratic_arena_http_requests_total{job="socratic-arena-backend"}[5m])), 0.001)
+          ) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: HTTP 5xx error rate is above 5%.
+          description: Backend server errors are elevated for at least 3 minutes.
+
+      - alert: SocraticArenaEventLoopLag
+        expr: socratic_arena_nodejs_eventloop_lag_seconds{job="socratic-arena-backend"} > 0.25
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: Node.js event loop lag is high.
+          description: The backend event loop has been delayed by more than 250 ms.
+
+      - alert: SocraticArenaHighMemory
+        expr: socratic_arena_process_resident_memory_bytes{job="socratic-arena-backend"} > 450000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Backend memory usage is high.
+          description: Resident memory has stayed above roughly 450 MB for 5 minutes.
+
+  - name: socratic-arena-realtime-and-ai
+    rules:
+      - alert: SocraticArenaAiFailures
+        expr: sum(rate(socratic_arena_ai_requests_total{job="socratic-arena-backend",status="failure"}[10m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Gemini AI requests are failing.
+          description: One or more AI calls have failed repeatedly in the last 10 minutes.
+
+      - alert: SocraticArenaSocketDisconnectStorm
+        expr: sum(rate(socratic_arena_match_events_total{job="socratic-arena-backend",event="socket_disconnect"}[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Socket disconnect rate is unusually high.
+          description: More than 30 disconnects per minute have been observed recently.
+
+      - alert: SocraticArenaQueueBacklog
+        expr: socratic_arena_waiting_queue_players{job="socratic-arena-backend"} > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Matchmaking queue backlog is growing.
+          description: More than 20 users have been waiting in queues for at least 5 minutes.

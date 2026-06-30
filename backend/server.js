@@ -16,6 +16,8 @@
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 import { config } from 'dotenv';
 import crypto from 'crypto';
+import { appendFile, mkdir } from 'fs/promises';
+import path from 'path';
 config();
 
 const SERVER_STARTED_AT = new Date().toISOString();
@@ -44,6 +46,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  */
 async function generateWithRetry(prompt, maxRetries = 3, expectJson = true) {
   let attempt = 0;
+  const mode = expectJson ? 'json' : 'text';
+  const startedAt = Date.now();
+
   while (attempt < maxRetries) {
     try {
       const model = genAI.getGenerativeModel({
@@ -53,17 +58,26 @@ async function generateWithRetry(prompt, maxRetries = 3, expectJson = true) {
       const result = await model.generateContent(prompt);
       const text = result.response.text();
 
-      if (!expectJson) return text;
+      if (!expectJson) {
+        recordAiRequest({ status: 'success', mode, durationSeconds: (Date.now() - startedAt) / 1000 });
+        return text;
+      }
 
       // Safe JSON parse
       const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
       const match = cleanText.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
       if (!match) throw new Error("No JSON found in response");
-      return JSON.parse(match[0]);
+
+      const parsed = JSON.parse(match[0]);
+      recordAiRequest({ status: 'success', mode, durationSeconds: (Date.now() - startedAt) / 1000 });
+      return parsed;
     } catch (err) {
       attempt++;
       console.error(`[AI Helper] Gemini call failed (attempt ${attempt}/${maxRetries}):`, err.message);
-      if (attempt >= maxRetries) throw err;
+      if (attempt >= maxRetries) {
+        recordAiRequest({ status: 'failure', mode, durationSeconds: (Date.now() - startedAt) / 1000 });
+        throw err;
+      }
       // Exponential backoff
       await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
     }
@@ -102,6 +116,16 @@ import apiRoutes from './routes/apiRoutes.js';
 
 // Import Supabase client for database operations
 import { supabase } from './lib/supabaseClient.js';
+import {
+  metricsHandler,
+  observeHttpRequests,
+  recordAiRequest,
+  recordAlertReceived,
+  recordMatchEvent,
+  recordSocketConnection,
+  recordSocketEvent,
+  setRuntimeGauges,
+} from './lib/observability.js';
 
 // Validate Supabase client initialization
 if (!supabase) {
@@ -246,6 +270,7 @@ async function resolveMatch(matchId) {
       }
     }
     console.log(`[Timer Resolution] Match ${matchId} status set to 'completed' (Winner: ${winnerId}).`);
+    recordMatchEvent('completed');
 
 
 
@@ -440,10 +465,92 @@ app.use((req, res, next) => {
   next();
 });
 
+// Record HTTP request counts and latency for every route below this point.
+app.use(observeHttpRequests);
+
+const isMetricsAuthorized = (req) => {
+  const token = process.env.METRICS_TOKEN;
+  if (!token) return true;
+  return req.query.token === token || req.get('authorization') === `Bearer ${token}`;
+};
+
+// Prometheus scrape endpoint. Keep this before the 404 handler.
+app.get('/metrics', (req, res, next) => {
+  if (!isMetricsAuthorized(req)) {
+    return res.status(401).json({ success: false, message: 'Unauthorized metrics request' });
+  }
+  return metricsHandler(req, res, next);
+});
+
+const isAlertWebhookAuthorized = (req) => {
+  const expectedSecret = process.env.ALERT_WEBHOOK_SECRET;
+  if (!expectedSecret) return true;
+  return req.query.secret === expectedSecret || req.get('x-alertmanager-secret') === expectedSecret;
+};
+
+const appendAlertAuditLog = async (payload) => {
+  const logPath = process.env.ALERT_LOG_PATH || path.join(process.cwd(), 'tmp', 'alerts.log');
+  await mkdir(path.dirname(logPath), { recursive: true });
+  await appendFile(logPath, `${JSON.stringify({ receivedAt: new Date().toISOString(), payload })}\n`);
+};
+
+const summarizePrometheusAlerts = (payload) => {
+  const alerts = Array.isArray(payload?.alerts) ? payload.alerts : [];
+  if (alerts.length === 0) return 'Prometheus alert received without alert details.';
+
+  return alerts.slice(0, 5).map((alert) => {
+    const labels = alert.labels || {};
+    const annotations = alert.annotations || {};
+    const status = (alert.status || payload.status || 'firing').toUpperCase();
+    const name = labels.alertname || 'UnnamedAlert';
+    const summary = annotations.summary || annotations.description || 'No summary provided.';
+    return `[${status}] ${name}: ${summary}`;
+  }).join('\n');
+};
+
+const forwardAlertExternally = async (payload) => {
+  const webhookUrl = process.env.ALERT_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  try {
+    const message = summarizePrometheusAlerts(payload);
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: `Socratic Arena performance alert\n${message}` }),
+    });
+
+    if (!response.ok) {
+      console.error(`[Alerts] External webhook failed with ${response.status}: ${await response.text()}`);
+    }
+  } catch (err) {
+    console.error('[Alerts] External webhook error:', err.message || err);
+  }
+};
+
+app.post('/api/alerts/prometheus', async (req, res) => {
+  if (!isAlertWebhookAuthorized(req)) {
+    return res.status(401).json({ success: false, message: 'Unauthorized alert webhook' });
+  }
+
+  const payload = req.body || {};
+  const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+  if (alerts.length === 0) {
+    recordAlertReceived(payload.status || 'unknown');
+  } else {
+    alerts.forEach((alert) => recordAlertReceived(alert.status || payload.status || 'unknown'));
+  }
+
+  await appendAlertAuditLog(payload);
+  await forwardAlertExternally(payload);
+
+  console.warn(`[Alerts] Received ${alerts.length || 1} Prometheus alert(s):\n${summarizePrometheusAlerts(payload)}`);
+  res.json({ success: true, received: alerts.length || 1 });
+});
+
 // Mount all API routes under a versionable base path.
 // Example: POST /api/debate
 app.use('/api', apiRoutes);
-
 // Endpoint to dynamically generate and save a 1-liner crux summary for a match
 app.post('/api/matches/:id/summary', async (req, res) => {
   const { id } = req.params;
@@ -575,6 +682,8 @@ app.get('/health', (req, res) => {
     success: true,
     message: 'Socratic Arena backend is running.',
     timestamp: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    uptimeSeconds: Math.round(process.uptime()),
   });
 });
 
@@ -621,6 +730,30 @@ const getUserSocketIds = (userId) => {
   return [socketRef].filter(Boolean);
 };
 
+const addUserSocket = (userId, socketId) => {
+  if (!userId || !socketId) return;
+  const existing = userSocketMap.get(userId);
+  const socketIds = existing instanceof Set
+    ? existing
+    : new Set(Array.isArray(existing) ? existing : [existing].filter(Boolean));
+
+  socketIds.add(socketId);
+  userSocketMap.set(userId, socketIds);
+};
+
+const removeUserSocket = (userId, socketId) => {
+  const existing = userSocketMap.get(userId);
+  if (!existing) return;
+
+  if (existing instanceof Set) {
+    existing.delete(socketId);
+    if (existing.size === 0) userSocketMap.delete(userId);
+    return;
+  }
+
+  if (existing === socketId) userSocketMap.delete(userId);
+};
+
 const getPrimaryUserSocketId = (userId) => {
   return getUserSocketIds(userId)[0] || null;
 };
@@ -660,6 +793,15 @@ const waitingQueues = {}; // topicId -> Array of socket IDs waiting for that top
 const roomTimers = {}; // roomId -> setInterval reference
 const gracePeriodTimeouts = {}; // roomId -> { critic: timeout, defender: timeout }
 
+const refreshRuntimeGauges = () => {
+  const waitingPlayerCount = Object.values(waitingQueues).reduce((total, queue) => total + queue.length, 0);
+  setRuntimeGauges({
+    activeMatchCount: Object.keys(activeRooms).length,
+    waitingPlayerCount,
+  });
+};
+
+refreshRuntimeGauges();
 /**
  * Generate unique room ID for matches
  */
@@ -819,6 +961,7 @@ const startRoomTimer = (roomId) => {
 
       // Broadcast globally so ALL Explore pages remove this match from "Live Arenas" instantly
       io.emit('match_ended', { matchId: roomId });
+      recordMatchEvent('timeout');
 
       // Transactional Cleanup: Purge from memory only after results are handled
       // We wait 5 seconds to ensure all final match_over events are received by clients
@@ -842,7 +985,10 @@ const cleanupRoom = (roomId) => {
     Object.values(gracePeriodTimeouts[roomId]).forEach(timeout => clearTimeout(timeout));
     delete gracePeriodTimeouts[roomId];
   }
+  const roomExisted = Boolean(activeRooms[roomId]);
   delete activeRooms[roomId];
+  if (roomExisted) recordMatchEvent('cleaned_up');
+  refreshRuntimeGauges();
 };
 
 /**
@@ -857,6 +1003,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
     console.log(`[resolve_abandoned] Room ${matchId} already gone from memory. Forcing DB status update.`);
     await supabase.from('matches').update({ status: 'abandoned' }).eq('id', matchId).eq('status', 'active');
     io.emit('match_ended', { matchId });
+    recordMatchEvent('abandoned');
     return;
   }
 
@@ -967,6 +1114,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
 
     // Broadcast globally ONLY AFTER DB update is successful to avoid race conditions with polling
     io.emit('match_ended', { matchId });
+    recordMatchEvent('abandoned');
 
   } catch (err) {
     console.error('[resolve_abandoned] Error:', err);
@@ -975,6 +1123,7 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
       await supabase.from('matches').update({ status: 'abandoned', transcript: savedTranscript }).eq('id', matchId).eq('status', 'active');
       // Still emit even in failsafe path
       io.emit('match_ended', { matchId });
+    recordMatchEvent('abandoned');
     } catch (e2) {
       console.error('[resolve_abandoned] Failsafe DB update also failed:', e2);
     }
@@ -1125,10 +1274,12 @@ io.use(async (socket, next) => {
 
 io.on('connection', (socket) => {
   console.log(`[socket] Client connected: ${socket.id}`);
+  recordSocketConnection(1);
+  socket.onAny((eventName) => recordSocketEvent(eventName));
 
   // Register user in socket map for targeted notifications
   if (socket.verifiedUserId) {
-    userSocketMap.set(socket.verifiedUserId, socket.id);
+    addUserSocket(socket.verifiedUserId, socket.id);
     console.log(`[userSocketMap] Registered ${socket.id} for user ${socket.verifiedUserId}`);
   }
 
@@ -1266,6 +1417,9 @@ io.on('connection', (socket) => {
         }
       };
 
+      recordMatchEvent('started');
+      refreshRuntimeGauges();
+
       io.to(roomId).emit('match_found', {
         roomId,
         topic: topicTitle,
@@ -1287,6 +1441,7 @@ io.on('connection', (socket) => {
       });
     } else {
       waitingQueues[topicId].push(newPlayer);
+      refreshRuntimeGauges();
       socket.emit('waiting_for_opponent');
       console.log(`[matchmaking] ⏳ ${socket.id} waiting for compatible partner in ${topicId}`);
     }
@@ -1527,13 +1682,16 @@ io.on('connection', (socket) => {
    * Leave queue (cancel matchmaking)
    */
   socket.on('leave_queue', () => {
+    let removedFromQueue = false;
     for (const [topicId, queue] of Object.entries(waitingQueues)) {
       const index = queue.findIndex(p => p.socketId === socket.id);
       if (index > -1) {
         queue.splice(index, 1);
+        removedFromQueue = true;
         console.log(`[matchmaking] 👋 ${socket.id} left queue for topic ${topicId}`);
       }
     }
+    if (removedFromQueue) refreshRuntimeGauges();
   });
 
   /**
@@ -1991,6 +2149,9 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
           [defenderUserId]: 1
         }
       };
+
+      recordMatchEvent('started');
+      refreshRuntimeGauges();
 
       // Emit match_found — clients identify their role via userId
       io.to(roomId).emit('match_found', {
@@ -2698,21 +2859,26 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
    */
   socket.on('disconnect', async (reason) => {
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
+    recordSocketConnection(-1);
+    recordMatchEvent('socket_disconnect');
 
     // Remove user from socket map
     if (socket.verifiedUserId) {
-      userSocketMap.delete(socket.verifiedUserId);
+      removeUserSocket(socket.verifiedUserId, socket.id);
       console.log(`[userSocketMap] Unregistered ${socket.id} for user ${socket.verifiedUserId}`);
     }
 
     // Remove from any topic waiting queue
+    let removedFromQueue = false;
     for (const [topicId, queue] of Object.entries(waitingQueues)) {
       const index = queue.findIndex(p => p.socketId === socket.id);
       if (index > -1) {
         queue.splice(index, 1);
+        removedFromQueue = true;
         console.log(`[disconnect] Removed ${socket.id} from queue for topic ${topicId}`);
       }
     }
+    if (removedFromQueue) refreshRuntimeGauges();
 
     // 🛡️ Handle active room disconnection with 30s grace period
     // Try both the tagged property and a fallback scan
