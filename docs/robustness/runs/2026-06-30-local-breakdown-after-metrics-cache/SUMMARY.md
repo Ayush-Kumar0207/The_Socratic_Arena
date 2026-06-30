@@ -129,9 +129,12 @@ This stage intentionally uses invalid JWTs. A clean `Authentication Error` is co
 
 Screenshots captured beside this report under `screenshots/`:
 
+- `screenshots/benchmark-evidence.png`
 - `screenshots/grafana-dashboard.png`
 - `screenshots/prometheus-query.png`
 - `screenshots/alertmanager-alerts.png`
+
+![Benchmark evidence](screenshots/benchmark-evidence.png)
 
 ![Grafana dashboard](screenshots/grafana-dashboard.png)
 

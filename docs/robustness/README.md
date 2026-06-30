@@ -25,6 +25,10 @@ The key hardening added before the final run was a short metrics cache around `G
 
 ## Screenshot Evidence
 
+Primary benchmark evidence:
+
+![Benchmark evidence](runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/benchmark-evidence.png)
+
 Grafana dashboard:
 
 ![Grafana dashboard](runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/grafana-dashboard.png)

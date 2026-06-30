@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Socratic Arena Robustness Evidence</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --panel: #101b2d;
+      --panel-2: #16233a;
+      --text: #eef4ff;
+      --muted: #9fb0ca;
+      --line: #263654;
+      --ok: #49d17c;
+      --warn: #ffd166;
+      --bad: #ff6b6b;
+      --cyan: #13d8ff;
+      --violet: #7c6cff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(19, 216, 255, 0.18), transparent 34rem),
+        linear-gradient(135deg, #07111f 0%, #0a1020 100%);
+      color: var(--text);
+      font: 16px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 44px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: start;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 42px;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid rgba(73, 209, 124, 0.45);
+      border-radius: 8px;
+      color: var(--ok);
+      background: rgba(73, 209, 124, 0.12);
+      font-weight: 800;
+      padding: 8px 12px;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin: 24px 0;
+    }
+
+    .metric,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(16, 27, 45, 0.92);
+      box-shadow: 0 16px 60px rgba(0, 0, 0, 0.24);
+    }
+
+    .metric {
+      padding: 16px;
+      min-height: 122px;
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .value {
+      margin-top: 12px;
+      font-size: 38px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .value.ok {
+      color: var(--ok);
+    }
+
+    .value.warn {
+      color: var(--warn);
+    }
+
+    .panel {
+      margin-top: 16px;
+      padding: 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 8px;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      vertical-align: middle;
+    }
+
+    th:first-child,
+    td:first-child {
+      text-align: left;
+    }
+
+    th {
+      color: #cbd7ee;
+      background: var(--panel-2);
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    td {
+      color: #e7eefc;
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .pass,
+    .ceiling {
+      display: inline-flex;
+      justify-content: center;
+      min-width: 88px;
+      border-radius: 8px;
+      padding: 5px 9px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .pass {
+      color: #07111f;
+      background: var(--ok);
+    }
+
+    .ceiling {
+      color: #07111f;
+      background: var(--warn);
+    }
+
+    .bar {
+      width: 100%;
+      height: 12px;
+      border-radius: 999px;
+      background: #091426;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+
+    .bar span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+    }
+
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .notes {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      header,
+      .grid,
+      .two {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <section>
+        <h1>Socratic Arena Robustness Breakdown</h1>
+        <p>Generated from <strong>results.json</strong> after the controlled local load run on June 30, 2026.</p>
+      </section>
+      <div class="badge">Backend stayed healthy after test</div>
+    </header>
+
+    <section class="grid" aria-label="headline benchmark metrics">
+      <div class="metric">
+        <div class="label">HTTP passed</div>
+        <div class="value ok">750/s</div>
+        <p>0.00% failures, p95 29.7 ms</p>
+      </div>
+      <div class="metric">
+        <div class="label">HTTP ceiling</div>
+        <div class="value warn">1000/s</div>
+        <p>Latency saturation, not 5xx errors</p>
+      </div>
+      <div class="metric">
+        <div class="label">Socket auth pressure</div>
+        <div class="value ok">100/s</div>
+        <p>Clean invalid-JWT rejection</p>
+      </div>
+      <div class="metric">
+        <div class="label">Post-run memory</div>
+        <div class="value">176.8 MB</div>
+        <p>Event-loop lag: 65.8 ms</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>HTTP Ramp: Public Backend Pressure</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Achieved</th>
+            <th>Requests</th>
+            <th>Failures</th>
+            <th>p50</th>
+            <th>p95</th>
+            <th>p99</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>250 req/s</td>
+            <td>250.1/s</td>
+            <td>2,001</td>
+            <td>0.00%</td>
+            <td>2.2 ms</td>
+            <td>5.0 ms</td>
+            <td>11.3 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>500 req/s</td>
+            <td>500.0/s</td>
+            <td>4,000</td>
+            <td>0.00%</td>
+            <td>2.1 ms</td>
+            <td>9.6 ms</td>
+            <td>23.9 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>750 req/s</td>
+            <td>749.4/s</td>
+            <td>5,995</td>
+            <td>0.00%</td>
+            <td>6.7 ms</td>
+            <td>29.7 ms</td>
+            <td>52.1 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>1000 req/s</td>
+            <td>760.9/s</td>
+            <td>6,087</td>
+            <td>0.00%</td>
+            <td>987.4 ms</td>
+            <td>5956.2 ms</td>
+            <td>6153.9 ms</td>
+            <td><span class="ceiling">CEILING</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Socket.IO Authentication Pressure</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Achieved</th>
+            <th>Attempts</th>
+            <th>Failures</th>
+            <th>p95</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>25 handshakes/s</td>
+            <td>25.0/s</td>
+            <td>200</td>
+            <td>0.00%</td>
+            <td>546.9 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>50 handshakes/s</td>
+            <td>50.0/s</td>
+            <td>400</td>
+            <td>0.00%</td>
+            <td>559.7 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>75 handshakes/s</td>
+            <td>75.0/s</td>
+            <td>600</td>
+            <td>0.00%</td>
+            <td>325.9 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+          <tr>
+            <td>100 handshakes/s</td>
+            <td>100.1/s</td>
+            <td>801</td>
+            <td>0.00%</td>
+            <td>284.2 ms</td>
+            <td><span class="pass">PASS</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="two">
+      <div class="panel">
+        <h2>Prometheus Snapshot After Run</h2>
+        <table>
+          <tbody>
+            <tr>
+              <td>Backend up</td>
+              <td>1</td>
+            </tr>
+            <tr>
+              <td>Request rate sample</td>
+              <td>134.7 req/s</td>
+            </tr>
+            <tr>
+              <td>Prometheus p95 sample</td>
+              <td>23.75 ms</td>
+            </tr>
+            <tr>
+              <td>Resident memory sample</td>
+              <td>173.9 MB</td>
+            </tr>
+            <tr>
+              <td>Event-loop lag sample</td>
+              <td>77.2 ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>Ceiling Interpretation</h2>
+        <p class="notes">The first failed/ceiling stage happened because p95 latency exceeded the configured 2000 ms ceiling. The backend did not return 5xx errors during the HTTP ramp, and the post-run health check remained healthy.</p>
+        <p class="notes">The Socket.IO stage used invalid JWTs deliberately. A clean Authentication Error counts as success because it proves the server rejects unauthenticated realtime pressure without accepting bogus users.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

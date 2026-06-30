@@ -76,13 +76,14 @@ The webhook receives these alert families:
 
 ## Screenshot Checklist
 
-Use these as proof-of-robustness screenshots in GitHub:
+Use these as proof-of-robustness screenshots in GitHub. The benchmark evidence image should be the primary proof because it shows the measured pass and ceiling tables directly:
 
-1. Grafana dashboard: `Socratic Arena Robustness Overview`
-2. Prometheus targets page showing `socratic-arena-backend` as `UP`
-3. Prometheus alerts page showing configured alert rules
-4. Alertmanager page showing active or resolved alerts
-5. Raw `/metrics` output showing `socratic_arena_*` metrics
+1. Benchmark evidence: `docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/benchmark-evidence.png`
+2. Grafana dashboard: `Socratic Arena Robustness Overview`
+3. Prometheus targets page showing `socratic-arena-backend` as `UP`
+4. Prometheus alerts page showing configured alert rules
+5. Alertmanager page showing active or resolved alerts
+6. Raw `/metrics` output showing `socratic_arena_*` metrics
 
 The latest completed breakdown report with embedded screenshots is in:
 
