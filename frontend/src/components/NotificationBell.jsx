@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, Swords, Check, X, Clock, CheckCircle2, XCircle, AlertTriangle, ChevronRight, Trash2, RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { setDismissedUpgradeVersion, setPendingUpgradeVersion } from '../lib/appVersion';
 
-const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateServiceWorker }) => {
+const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateServiceWorker, upgradeNotice }) => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState(() => {
     try {
@@ -16,9 +17,12 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
   const [respondedActions, setRespondedActions] = useState(new Map()); // challengeId -> 'accept' | 'decline'
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [upgradeStatus, setUpgradeStatus] = useState('idle'); // 'idle' | 'upgrading' | 'done'
+  const [upgradeInfo, setUpgradeInfo] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const panelRef = useRef(null);
 
   const unreadCount = notifications.filter(n => !n.is_read).length + (needRefresh && upgradeStatus === 'idle' ? 1 : 0);
+  const activeUpgradeInfo = upgradeInfo || upgradeNotice;
 
   // --- Fetch notifications on mount & socket connect ---
   useEffect(() => {
@@ -29,6 +33,8 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
 
     const handleList = async ({ notifications: notifs }) => {
       if (!notifs) return;
+
+      notifs = notifs.filter(n => n.type !== 'system_upgrade');
 
       // PROACTIVE SYNC: Check match statuses for challenge_accepted items
       // This ensures "Enter Lobby" vanishes IMMEDIATELY if the debate ended
@@ -176,14 +182,16 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
     };
 
     // Listen for match_ended to refresh notification statuses (remove stale "Enter Lobby" buttons)
-    const handleMatchEnded = ({ matchId }) => {
+    const handleMatchEnded = () => {
       console.log('[NotificationBell] match_ended received, refreshing notifications...');
       socket.emit('fetch_notifications');
     };
 
     // Handle server-triggered upgrade notification (from deploy)
-    const handleAppUpgrade = () => {
+    const handleAppUpgrade = (data = {}) => {
       console.log('[NotificationBell] app_upgrade_available received from server');
+      setUpgradeInfo(data);
+      setPendingUpgradeVersion(data.version || '');
       setNeedRefresh(true);
       setUpgradeStatus('idle');
     };
@@ -214,6 +222,13 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
       socket.off('app_upgrade_available', handleAppUpgrade);
     };
   }, [socket, user, navigate, setNeedRefresh]);
+
+
+
+  useEffect(() => {
+    const intervalId = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   // --- Close panel on outside click ---
   useEffect(() => {
@@ -268,7 +283,7 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
   };
 
   const getTimeAgo = (dateStr) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
+    const diff = nowMs - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'Just now';
     if (mins < 60) return `${mins}m ago`;
@@ -481,7 +496,12 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                               </button>
                               <button
                                 onClick={() => {
+                                  if (activeUpgradeInfo?.version) {
+                                    setDismissedUpgradeVersion(activeUpgradeInfo.version);
+                                  }
+                                  setPendingUpgradeVersion('');
                                   setNeedRefresh(false);
+                                  setUpgradeInfo(null);
                                 }}
                                 className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-lg border border-slate-600/50 transition-all"
                               >
@@ -630,8 +650,6 @@ const NotificationBell = ({ socket, user, needRefresh, setNeedRefresh, updateSer
                               const isEnded = matchStatus === 'completed' || matchStatus === 'pending_votes';
                               // Match expired if it was abandoned (timed out or everyone left)
                               const isExpired = matchStatus === 'abandoned';
-                              // Show Enter Lobby for: active, waiting (paired but not started), or unknown
-                              const isActive = !matchStatus || matchStatus === 'active' || matchStatus === 'waiting' || matchStatus === 'unknown' || matchStatus === 'paired';
                               // Only hide if explicitly ended/expired/abandoned
                               const isInactive = isEnded || isExpired || matchStatus === 'abandoned';
                               

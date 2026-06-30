@@ -18,6 +18,15 @@ import { config } from 'dotenv';
 import crypto from 'crypto';
 config();
 
+const SERVER_STARTED_AT = new Date().toISOString();
+const APP_VERSION =
+  process.env.APP_VERSION ||
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.COMMIT_SHA ||
+  process.env.SOURCE_VERSION ||
+  (process.env.NODE_ENV === 'production' ? SERVER_STARTED_AT : 'dev');
+
 // FEATURE FLAG: Logic control for high-cost Gemini AI features
 const ENABLE_ADVANCED_AI = process.env.ENABLE_ADVANCED_AI !== 'false'; // Toggle to true to re-enable Highlights & Judge Intervention
 
@@ -495,6 +504,18 @@ app.post('/api/admin/broadcast-notification', async (req, res) => {
     if (!title || !message) {
       return res.status(400).json({ success: false, message: 'Title and message are required' });
     }
+
+    if (type === 'system_upgrade') {
+      const version = metadata.version || APP_VERSION;
+      io.emit('app_upgrade_available', {
+        version,
+        serverStartedAt: SERVER_STARTED_AT,
+        message,
+        reason: 'admin_broadcast'
+      });
+      console.log(`[Broadcast] ✅ Emitted ephemeral upgrade prompt for version ${version}`);
+      return res.json({ success: true, message: 'Upgrade prompt emitted to connected users', count: io.engine.clientsCount, ephemeral: true });
+    }
     
     // Fetch all user IDs
     const { data: users, error: usersError } = await supabase
@@ -589,6 +610,27 @@ app.set('cancelledDebates', cancelledDebates);
  * regardless of which socket they're connected on.
  */
 const userSocketMap = new Map();
+
+const getSocketClientVersion = (socket) => socket.handshake.auth?.appVersion || socket.handshake.query?.appVersion || null;
+const getSocketDismissedUpgradeVersion = (socket) => socket.handshake.auth?.dismissedUpgradeVersion || null;
+
+const emitUpgradeIfClientIsStale = (socket) => {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (getSocketDismissedUpgradeVersion(socket) === APP_VERSION) return;
+
+  const clientVersion = getSocketClientVersion(socket);
+  if (clientVersion === APP_VERSION) return;
+
+  setTimeout(() => {
+    if (!socket.connected) return;
+    socket.emit('app_upgrade_available', {
+      version: APP_VERSION,
+      serverStartedAt: SERVER_STARTED_AT,
+      reason: clientVersion ? 'client_version_mismatch' : 'missing_client_version',
+      message: 'A newer version of Socratic Arena is ready.'
+    });
+  }, 1500);
+};
 
 /**
  * Multiplayer Matchmaking State
@@ -947,7 +989,11 @@ io.on('connection', (socket) => {
   socket.emit('server:ready', {
     message: 'Socket connection established. Blitz Debating matchmaking ready.',
     socketId: socket.id,
+    appVersion: APP_VERSION,
+    serverStartedAt: SERVER_STARTED_AT,
   });
+  socket.emit('app_version', { version: APP_VERSION, serverStartedAt: SERVER_STARTED_AT });
+  emitUpgradeIfClientIsStale(socket);
 
   // Global VIP Online Broadcasting
   socket.on('user_online', (userData) => {
@@ -2366,27 +2412,42 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         return socket.emit('notifications_list', { notifications: [], error: 'Failed to fetch notifications.' });
       }
 
-      // Check if any notifications are challenge accepted with an arena_id, and attach match status
+      // Check accepted challenge notifications and attach the current private-arena/match status.
       if (data && data.length > 0) {
         const arenaIds = data
           .filter(n => n.type === 'challenge_accepted' && n.metadata?.arena_id)
           .map(n => n.metadata.arena_id);
-          
+
         if (arenaIds.length > 0) {
-          const { data: matches } = await supabase
-            .from('matches')
-            .select('id, status')
+          const { data: arenas } = await supabase
+            .from('private_arenas')
+            .select('id, match_id, status')
             .in('id', arenaIds);
 
-          if (matches) {
-            const matchMap = Object.fromEntries(matches.map(m => [m.id, m.status]));
-            data.forEach(n => {
-              if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
-                // Determine if match status is active, completed, abandoned, etc.
-                n.metadata.match_status = matchMap[n.metadata.arena_id] || 'unknown';
-              }
-            });
+          const matchIds = (arenas || []).filter(a => a.match_id).map(a => a.match_id);
+          let matchStatusMap = {};
+
+          if (matchIds.length > 0) {
+            const { data: matches } = await supabase
+              .from('matches')
+              .select('id, status')
+              .in('id', matchIds);
+
+            matchStatusMap = Object.fromEntries((matches || []).map(m => [m.id, m.status]));
           }
+
+          const arenaStatusMap = Object.fromEntries((arenas || []).map(a => {
+            if (a.match_id && matchStatusMap[a.match_id]) return [a.id, matchStatusMap[a.match_id]];
+            if (a.status === 'paired') return [a.id, 'waiting'];
+            if (a.status === 'started') return [a.id, 'active'];
+            return [a.id, a.status || 'unknown'];
+          }));
+
+          data.forEach(n => {
+            if (n.type === 'challenge_accepted' && n.metadata?.arena_id) {
+              n.metadata.match_status = arenaStatusMap[n.metadata.arena_id] || 'unknown';
+            }
+          });
         }
       }
 
@@ -2549,11 +2610,11 @@ app.use((err, req, res, next) => {
 const PORT = Number(process.env.PORT) || 5000;
 
 /**
- * Auto-Broadcast Upgrade Notification on Server Startup
+ * Upgrade Notification Strategy
  * ---------------------------------------------------------------------------
- * When the server starts (i.e., after a Render deploy), automatically notify
- * all users that an upgrade is available via real-time socket emission.
- * This triggers the PWA upgrade notification with Upgrade/Dismiss buttons.
+ * The previous startup-only broadcast was easy to miss: users had to be online
+ * during the first few seconds after deploy. We now notify stale clients when
+ * they connect, using the frontend build version sent in socket.auth.
  */
 async function broadcastUpgradeOnStartup() {
   if (process.env.NODE_ENV !== 'production') {
@@ -2561,16 +2622,7 @@ async function broadcastUpgradeOnStartup() {
     return;
   }
 
-  // Wait for sockets to connect after deploy
-  await sleep(5000);
-
-  // Emit real-time event to trigger PWA upgrade notification on all connected clients
-  io.emit('app_upgrade_available', { 
-    version: new Date().toISOString(),
-    message: 'A newer version of Socratic Arena is ready.'
-  });
-
-  console.log(`[Auto-Upgrade] ✅ Broadcasted upgrade notification to all connected clients`);
+  console.log(`[Auto-Upgrade] Active version ${APP_VERSION}. Stale clients will be notified on connection.`);
 }
 
 try {

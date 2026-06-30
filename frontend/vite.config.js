@@ -2,8 +2,21 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const buildTime = new Date().toISOString()
+const env = globalThis.process?.env || {}
+const buildVersion =
+  env.VITE_APP_VERSION ||
+  env.VERCEL_GIT_COMMIT_SHA ||
+  env.RENDER_GIT_COMMIT ||
+  env.COMMIT_SHA ||
+  (env.NODE_ENV === 'production' ? buildTime : 'dev')
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(buildVersion),
+    'import.meta.env.VITE_APP_BUILD_TIME': JSON.stringify(buildTime),
+  },
   plugins: [
     react(),
     VitePWA({

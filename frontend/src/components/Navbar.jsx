@@ -4,7 +4,7 @@ import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
-const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeedRefresh, updateServiceWorker }) => {
+const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeedRefresh, updateServiceWorker, upgradeNotice }) => {
   const location = useLocation();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -70,7 +70,7 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
             </div>
 
             {/* Notification Bell */}
-            {user && <NotificationBell socket={socket} user={user} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} />}
+            {user && <NotificationBell socket={socket} user={user} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} upgradeNotice={upgradeNotice} />}
 
             {/* Desktop Account Button */}
             <button

@@ -2,6 +2,13 @@ import { useEffect, useState, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { supabase } from './lib/supabaseClient';
+import {
+  APP_BUILD_TIME,
+  APP_VERSION,
+  getDismissedUpgradeVersion,
+  setPendingUpgradeVersion,
+  setStoredAppVersion,
+} from './lib/appVersion';
 
 // Core layout & critical pages (Keep static for instant first paint)
 import Navbar from './components/Navbar';
@@ -28,6 +35,13 @@ const socket = io(import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000', {
   timeout: 20000, // Extended timeout for slow LANs
 });
 
+const buildSocketAuth = (token) => ({
+  token,
+  appVersion: APP_VERSION,
+  appBuildTime: APP_BUILD_TIME,
+  dismissedUpgradeVersion: getDismissedUpgradeVersion(),
+});
+
 const App = () => {
   const [session, setSession] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -44,6 +58,7 @@ const App = () => {
   const [joinFeedback, setJoinFeedback] = useState('');
 
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [upgradeNotice, setUpgradeNotice] = useState(null);
 
   // PWA Service Worker — lifted here so upgrade state flows into NotificationBell
   const {
@@ -60,8 +75,40 @@ const App = () => {
         }, 20 * 60 * 1000);
       }
     },
+    onNeedRefresh() {
+      setUpgradeNotice({ source: 'service-worker', version: APP_VERSION, buildTime: APP_BUILD_TIME });
+    },
     onRegisterError(error) { console.error('[PWA] SW Registration Error:', error); },
   });
+
+  useEffect(() => {
+    setStoredAppVersion(APP_VERSION);
+
+    const handleAppVersion = (data = {}) => {
+      if (!data.version) return;
+      if (data.version !== APP_VERSION && getDismissedUpgradeVersion() !== data.version) {
+        setPendingUpgradeVersion(data.version);
+        setUpgradeNotice(data);
+        setNeedRefresh(true);
+      }
+    };
+
+    const handleAppUpgrade = (data = {}) => {
+      const version = data.version || data.buildVersion || '';
+      if (version && getDismissedUpgradeVersion() === version) return;
+      setPendingUpgradeVersion(version);
+      setUpgradeNotice({ ...data, version });
+      setNeedRefresh(true);
+    };
+
+    socket.on('app_version', handleAppVersion);
+    socket.on('app_upgrade_available', handleAppUpgrade);
+
+    return () => {
+      socket.off('app_version', handleAppVersion);
+      socket.off('app_upgrade_available', handleAppUpgrade);
+    };
+  }, [setNeedRefresh]);
 
   useEffect(() => {
     // Auth Resilience: Retry with Exponential Backoff (500ms, 1s, 2s)
@@ -71,7 +118,7 @@ const App = () => {
         setSession(session);
         setIsAuthLoading(false);
         if (session) {
-          socket.auth = { token: session.access_token };
+          socket.auth = buildSocketAuth(session.access_token);
           socket.connect();
         }
       } catch (err) {
@@ -100,7 +147,7 @@ const App = () => {
       setSession(session);
       if (session) {
         if (socket.auth?.token !== session.access_token) {
-          socket.auth = { token: session.access_token };
+          socket.auth = buildSocketAuth(session.access_token);
           if (socket.connected) {
             socket.disconnect().connect();
           } else {
@@ -124,7 +171,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
       {/* Render persistent Navbar only for authenticated users */}
-      {session && <Navbar user={session.user} socket={socket} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} />}
+      {session && <Navbar user={session.user} socket={socket} needRefresh={needRefresh} setNeedRefresh={setNeedRefresh} updateServiceWorker={updateServiceWorker} upgradeNotice={upgradeNotice} onCreateArena={() => { setShowCreateDialog(true); setCreateTopic(''); setCreateQuestion(''); setCreateStatus('idle'); setCreateFeedback(''); }} onJoinArena={() => { setShowJoinDialog(true); setJoinCode(''); setJoinStatus('idle'); setJoinFeedback(''); }} />}
 
       {/* GLOBAL CREATE ARENA DIALOG */}
       {showCreateDialog && <CreateArenaDialog

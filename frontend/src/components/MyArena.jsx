@@ -154,43 +154,48 @@ const MyArena = ({ user, socket }) => {
 
     fetchData();
 
+    const handleTopicResult = (data) => {
+      if (!data.success && data.message?.includes('Similar topic')) {
+        fetchData();
+      }
+    };
+
+    const handleTrendingSearchResult = (data) => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      setIsSearchingTrending(false);
+      if (data.found && data.matchedTopic) {
+        setTrendingSearchQuery(data.matchedTopic);
+        setTrendingFeedback({ type: 'success', text: `Found semantic match: "${data.matchedTopic}"` });
+      } else {
+        setTrendingFeedback({ type: 'error', text: 'No semantically matching trending debates found.' });
+      }
+      setTimeout(() => setTrendingFeedback(null), 4000);
+    };
+
+    const handleSavedSearchResult = (data) => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      setIsSearchingSaved(false);
+      if (data.found && data.matchedTopic) {
+        setSavedSearchQuery(data.matchedTopic);
+        setSavedFeedback({ type: 'success', text: `Found semantic match: "${data.matchedTopic}"` });
+      } else {
+        setSavedFeedback({ type: 'error', text: 'No semantically matching saved arenas found.' });
+      }
+      setTimeout(() => setSavedFeedback(null), 4000);
+    };
+
     if (socket) {
       socket.on('new_topic_added', fetchData);
-      socket.on('topic_result', (data) => {
-        if (!data.success && data.message.includes('Similar topic')) {
-           // It was a duplicate, try fetching again
-           fetchData();
-        }
-      });
-      socket.on('semantic_search_myarena_trending_result', (data) => {
-        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-        setIsSearchingTrending(false);
-        if (data.found && data.matchedTopic) {
-          setTrendingSearchQuery(data.matchedTopic);
-          setTrendingFeedback({ type: 'success', text: `Found semantic match: "${data.matchedTopic}"` });
-        } else {
-          setTrendingFeedback({ type: 'error', text: 'No semantically matching trending debates found.' });
-        }
-        setTimeout(() => setTrendingFeedback(null), 4000);
-      });
-      socket.on('semantic_search_myarena_saved_result', (data) => {
-        if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-        setIsSearchingSaved(false);
-        if (data.found && data.matchedTopic) {
-          setSavedSearchQuery(data.matchedTopic);
-          setSavedFeedback({ type: 'success', text: `Found semantic match: "${data.matchedTopic}"` });
-        } else {
-          setSavedFeedback({ type: 'error', text: 'No semantically matching saved arenas found.' });
-        }
-        setTimeout(() => setSavedFeedback(null), 4000);
-      });
+      socket.on('topic_result', handleTopicResult);
+      socket.on('semantic_search_myarena_trending_result', handleTrendingSearchResult);
+      socket.on('semantic_search_myarena_saved_result', handleSavedSearchResult);
     }
     return () => {
       if (socket) {
         socket.off('new_topic_added', fetchData);
-        socket.off('topic_result');
-        socket.off('semantic_search_myarena_trending_result');
-        socket.off('semantic_search_myarena_saved_result');
+        socket.off('topic_result', handleTopicResult);
+        socket.off('semantic_search_myarena_trending_result', handleTrendingSearchResult);
+        socket.off('semantic_search_myarena_saved_result', handleSavedSearchResult);
       }
     };
   }, [user, socket]);

@@ -274,32 +274,29 @@ const Explore = ({ socket, user }) => {
     }, 10000); // This interval is now redundant if fetchLiveMatches is called every 5s in the first useEffect.
                // I'll remove the interval setup here to avoid duplicate intervals.
     
-    // Listen for real-time topic additions
+    const handleNewTopicAdded = async () => {
+      const { data, error } = await supabase
+        .from('topics')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error("[Explore] Topics Fetch Error:", error.message, error.details);
+      }
+      if (!error && data) {
+        setTopics(data);
+        localStorage.setItem('explore_topics', JSON.stringify(data));
+      }
+    };
+
     if (socket) {
-      socket.on('new_topic_added', () => {
-        // Re-fetch topics when a new one is added
-        const fetchTopics = async () => {
-          const { data, error } = await supabase
-            .from('topics')
-            .select('*')
-            .order('created_at', { ascending: false });
-          
-          if (error) {
-            console.error("[Explore] Topics Fetch Error:", error.message, error.details);
-          }
-          if (!error && data) {
-            setTopics(data);
-            localStorage.setItem('explore_topics', JSON.stringify(data));
-          }
-        };
-        fetchTopics();
-      });
+      socket.on('new_topic_added', handleNewTopicAdded);
     }
 
     return () => {
       clearInterval(timerInterval);
-      // clearInterval(interval); // Removed as it's redundant with the first useEffect's interval
-      if (socket) socket.off('new_topic_added', () => {}); // Correctly remove the listener
+      clearInterval(interval);
+      if (socket) socket.off('new_topic_added', handleNewTopicAdded);
     };
   }, [socket]); // Dependencies adjusted
 
