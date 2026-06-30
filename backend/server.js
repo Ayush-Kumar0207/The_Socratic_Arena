@@ -2975,17 +2975,23 @@ async function broadcastUpgradeOnStartup() {
   console.log(`[Auto-Upgrade] Active version ${APP_VERSION}. Stale clients will be notified on connection.`);
 }
 
-try {
-  httpServer.listen(PORT, () => {
-    console.log(`🚀 Server is listening on http://localhost:${PORT}`);
+httpServer.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`[startup] Port ${PORT} is already in use. Stop the existing backend process, or start this one with a different PORT value.`);
+    console.error(`[startup] Example: $env:PORT="5001"; npm run dev`);
+  } else {
+    console.error('❌ Failed to start server:', error);
+  }
 
-    // Trigger upgrade broadcast after server is ready
-    broadcastUpgradeOnStartup();
-  });
-} catch (error) {
-  console.error('❌ Failed to start server:', error);
   process.exit(1);
-}
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server is listening on http://localhost:${PORT}`);
+
+  // Trigger upgrade broadcast after server is ready
+  broadcastUpgradeOnStartup();
+});
 
 // Export app/io for future testing or modular integration in next steps.
 export { app, io, httpServer };

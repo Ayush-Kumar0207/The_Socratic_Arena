@@ -358,7 +358,7 @@ $env:ALERT_WEBHOOK_SECRET="local-alert-secret"
 npm run dev
 
 # Terminal 2: Prometheus + Grafana + Alertmanager
-docker compose -f observability/docker-compose.yml up
+docker compose -f observability/docker-compose.yml up -d --pull never
 ```
 
 Open Grafana at `http://localhost:3001` with `admin` / `admin`, then load the `Socratic Arena Robustness Overview` dashboard. For automatic Discord/Slack-style alerts, set `ALERT_WEBHOOK_URL` before starting Docker Compose; the independent alert relay still works if the backend crashes.

@@ -34,7 +34,7 @@ services:
       - alert-relay
 
   alert-relay:
-    image: node:20-alpine
+    image: node:18-alpine
     working_dir: /app
     command: ["node", "server.js"]
     environment:
@@ -45,7 +45,7 @@ services:
       - ./alert-relay:/app:ro
 
   grafana:
-    image: grafana/grafana-oss:latest
+    image: grafana/grafana:latest
     ports:
       - "3001:3000"
     environment:

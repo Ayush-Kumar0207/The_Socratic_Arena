@@ -31,7 +31,7 @@ Terminal 2:
 # Optional, but recommended for automatic external alerts
 $env:ALERT_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 
-docker compose -f observability/docker-compose.yml up
+docker compose -f observability/docker-compose.yml up -d --pull never
 ```
 
 For production, set `METRICS_TOKEN` on the backend and configure your Prometheus scrape job with either `authorization.credentials` or a `?token=` param. Leave it unset for local development.
@@ -60,7 +60,7 @@ For external notifications, set this before starting Docker Compose:
 
 ```bash
 $env:ALERT_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-docker compose -f observability/docker-compose.yml up
+docker compose -f observability/docker-compose.yml up -d --pull never
 ```
 
 The webhook receives these alert families:
@@ -83,3 +83,27 @@ Use these as proof-of-robustness screenshots in GitHub:
 3. Prometheus alerts page showing configured alert rules
 4. Alertmanager page showing active or resolved alerts
 5. Raw `/metrics` output showing `socratic_arena_*` metrics
+## Troubleshooting
+
+### Backend says `EADDRINUSE :5000`
+
+Another backend is already running on port `5000`. That is okay if `http://localhost:5000/health` works; Prometheus can scrape the existing process. If you need to restart it, stop the old terminal/process first, then run `npm run dev` again.
+
+To check quickly:
+
+```bash
+netstat -ano | Select-String ':5000'
+Invoke-WebRequest http://localhost:5000/health -UseBasicParsing
+```
+
+### Docker says it cannot connect to `dockerDesktopLinuxEngine`
+
+Start Docker Desktop and wait until it finishes booting. In this Codex sandbox, Docker commands may need elevated execution even after Docker Desktop is running.
+
+### Docker Compose hangs while pulling images
+
+This repo's compose file uses common local images: `prom/prometheus:latest`, `prom/alertmanager:latest`, `grafana/grafana:latest`, and `node:18-alpine`. If they already exist locally, run:
+
+```bash
+docker compose -f observability/docker-compose.yml up -d --pull never
+```
