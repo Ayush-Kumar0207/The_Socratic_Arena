@@ -1,0 +1,34 @@
+name: Refresh Backend Dependency Lock
+
+on:
+  push:
+    branches: [agent/cloud-runtime-ci]
+    paths:
+      - .github/workflows/refresh-backend-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/cloud-runtime-ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm audit fix --package-lock-only
+        working-directory: backend
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: backend
+      - name: Commit refreshed lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/package-lock.json
+          git diff --cached --quiet || git commit -m "Refresh backend dependency lockfile"
+          git push
