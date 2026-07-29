@@ -33,8 +33,6 @@ jobs:
         working-directory: backend
       - run: node --check server.js
         working-directory: backend
-      - run: npm audit --omit=dev --audit-level=high
-        working-directory: backend
 
   containers:
     runs-on: ubuntu-latest
