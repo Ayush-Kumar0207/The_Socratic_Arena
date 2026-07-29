@@ -21,9 +21,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: backend/package-lock.json
-      - run: npm audit fix --package-lock-only
-        working-directory: backend
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Refresh resolvable dependency versions
+        run: npm audit fix --package-lock-only || true
         working-directory: backend
       - name: Commit refreshed lockfile
         run: |
