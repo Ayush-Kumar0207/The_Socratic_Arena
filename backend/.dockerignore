@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+tmp
+*.log
+npm-debug.log*
+Dockerfile*
+README.md
+run_*.bat
+.DS_Store
+Thumbs.db

@@ -201,7 +201,6 @@ export function analyzeTextTone(text, metrics = {}) {
     currentEnergy = 0,
     baselineEnergy = 0,
     deltaT = 0,
-    precedingContext = [],
   } = metrics;
 
   // 2. Lexicon Check: High-intensity words force 'urgent'
@@ -562,6 +561,7 @@ export default function useVoiceRecognition({
   const speechCheckTimerRef = useRef(null); // Timer to check if speech is being recognized
   const hasReceivedSpeechRef = useRef(false); // Did we ever receive speech in this session?
   const speechStartedRef = useRef(false); // Did browser detect speech audio in this cycle?
+  const stopListeningRef = useRef(() => {});
 
   // ── Acoustic-Semantic Lock: The Three Dimensional Trackers ──
 
@@ -944,7 +944,7 @@ export default function useVoiceRecognition({
         recognitionRef.current.onspeechstart = null;
         recognitionRef.current.onaudiostart = null;
         recognitionRef.current.abort();
-      } catch (e) { /* noop */ }
+      } catch { /* noop */ }
       recognitionRef.current = null;
     }
   }, []);
@@ -958,11 +958,11 @@ export default function useVoiceRecognition({
 
     // Tear down Phase 5 audio analysis
     if (audioSourceRef.current) {
-      try { audioSourceRef.current.disconnect(); } catch (e) { /* noop */ }
+      try { audioSourceRef.current.disconnect(); } catch { /* noop */ }
       audioSourceRef.current = null;
     }
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      try { audioContextRef.current.close(); } catch (e) { /* noop */ }
+      try { audioContextRef.current.close(); } catch { /* noop */ }
     }
     audioContextRef.current = null;
     analyserRef.current = null;
@@ -1137,8 +1137,8 @@ export default function useVoiceRecognition({
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       localSttStoppingRef.current = true;
-      try { recorder.requestData(); } catch (e) { /* noop */ }
-      try { recorder.stop(); } catch (e) { /* noop */ }
+      try { recorder.requestData(); } catch { /* noop */ }
+      try { recorder.stop(); } catch { /* noop */ }
     }
 
     if (localSttAbortControllerRef.current) {
@@ -1268,7 +1268,7 @@ export default function useVoiceRecognition({
 
       if (event.error === 'not-allowed') {
         setError('Microphone access denied.');
-        stopListeningFn();
+        stopListeningRef.current();
       } else if (event.error === 'audio-capture' && isMobile) {
         // MOBILE FIX: On some mobile browsers, audio-capture error can occur
         // when the mic is briefly unavailable. Retry after a short delay.
@@ -1353,6 +1353,10 @@ export default function useVoiceRecognition({
     releaseStream();
   }, [flushFinalBuffer, stopLocalSttRecorder, killRecognition, releaseStream]);
 
+  useEffect(() => {
+    stopListeningRef.current = stopListeningFn;
+  }, [stopListeningFn]);
+
   /** Toggle listening — request mic permission on first activation. */
   const startListening = useCallback(async () => {
     if (!enabled) return;
@@ -1426,13 +1430,13 @@ export default function useVoiceRecognition({
           stream = await navigator.mediaDevices.getUserMedia({
             audio: { autoGainControl: false, echoCancellation: true, noiseSuppression: true }
           });
-        } catch (e) {
+        } catch {
           console.warn('[Voice] Desktop Tier 1 failed, dropping autoGainControl...');
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               audio: { echoCancellation: true, noiseSuppression: true }
             });
-          } catch (e2) {
+          } catch {
             console.warn('[Voice] Desktop Tier 2 failed, requesting raw audio...');
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           }
@@ -1482,10 +1486,10 @@ export default function useVoiceRecognition({
       stopLocalSttRecorder();
       killRecognition();
       if (audioSourceRef.current) {
-        try { audioSourceRef.current.disconnect(); } catch (e) { /* noop */ }
+        try { audioSourceRef.current.disconnect(); } catch { /* noop */ }
       }
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        try { audioContextRef.current.close(); } catch (e) { /* noop */ }
+        try { audioContextRef.current.close(); } catch { /* noop */ }
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());

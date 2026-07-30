@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { X, LogOut, Shield, Wifi, Copy, CheckCircle2, ArrowLeft, UserPlus, UserCheck, Swords, Search, ChevronDown, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
@@ -97,6 +97,17 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
         return () => document.removeEventListener('mousedown', handleClick);
     }, [isDropdownOpen]);
 
+    const resetChallengeState = useCallback(() => {
+        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
+        challengeTimeoutRef.current = null;
+        setSelectedTopic(null);
+        setSelectedStance('Random');
+        setChallengStatus('idle');
+        setChallengeFeedback('');
+        setTopicSearch('');
+        setIsDropdownOpen(false);
+    }, []);
+
     // Listen for challenge events
     useEffect(() => {
         if (!socket) return;
@@ -127,18 +138,8 @@ const ProfileModal = ({ isOpen, onClose, viewUser, currentUserId, currentUser, s
             socket.off('challenge_sent', handleSent);
             socket.off('challenge_error', handleError);
         };
-    }, [socket, activeUser?.username]);
+    }, [socket, activeUser?.username, resetChallengeState]);
 
-    const resetChallengeState = () => {
-        if (challengeTimeoutRef.current) clearTimeout(challengeTimeoutRef.current);
-        challengeTimeoutRef.current = null;
-        setSelectedTopic(null);
-        setSelectedStance('Random');
-        setChallengStatus('idle');
-        setChallengeFeedback('');
-        setTopicSearch('');
-        setIsDropdownOpen(false);
-    };
 
     useEffect(() => {
         const handleOutsideClick = (event) => {

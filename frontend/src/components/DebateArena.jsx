@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Shield, Swords, Search, MessageCircle, Loader2, Clock, Gavel, Scale, NotebookPen, ArrowRight, Target, Brain, AlertTriangle, GitBranch, Activity } from 'lucide-react';
-import jsPDF from 'jspdf';
 import useVoiceRecognition, { analyzeTextTone } from '../hooks/useVoiceRecognition';
 import VoiceOrb from './VoiceOrb';
 import { generateStances } from '../utils/stanceUtils';
@@ -51,20 +50,13 @@ const riskTone = (severity) => {
 };
 
 const riskLabel = (score = 0) => `${Math.round(Math.max(0, Math.min(1, score)) * 100)}%`;
+const ENABLE_AI_OBJECTION = false;
 
 /**
  * DebateArena
  * Full-screen, server-authoritative 1v1 debate UI.
  */
-const DebateArena = ({
-  transcript = [],
-  isLoading = false,
-  isSocketConnected = false,
-  canStopDebate = false,
-  onStopDebate = null,
-  socket = null,
-  user = null,
-}) => {
+const DebateArena = ({ socket = null, user = null }) => {
   const navigate = useNavigate();
   const { matchId } = useParams();
   const { state } = useLocation();
@@ -112,13 +104,11 @@ const DebateArena = ({
   const [hasUsedLifeline, setHasUsedLifeline] = useState(false);
   const [objectionLoadingId, setObjectionLoadingId] = useState(null);
   const [interventions, setInterventions] = useState({});
-  const ENABLE_AI_OBJECTION = false; // Toggle to true to reveal the button
-
-  const handleSummonAIJudge = (messageId) => {
+  const handleSummonAIJudge = useCallback((messageId) => {
     if (hasUsedLifeline || playerRole === 'Spectator') return;
     setObjectionLoadingId(messageId);
     socket.emit('summon_ai_judge', { roomId, targetMessageId: messageId });
-  };
+  }, [hasUsedLifeline, playerRole, roomId, socket]);
 
   // ── THE VOICE OF REASON ──
   const isMyTurn = !!(playerRole && activeSpeaker && playerRole.toLowerCase() === activeSpeaker.toLowerCase() && matchStatus === 'active');
@@ -175,10 +165,10 @@ const DebateArena = ({
         handleSummonAIJudge(lastOpponentMsg.id);
       }
     }
-  }, [ENABLE_AI_OBJECTION, hasUsedLifeline, playerRole]);
+  }, [handleSummonAIJudge, hasUsedLifeline, playerRole]);
 
   // SAFETY NET #3: Functional state updates to prevent stale closures
-  const handleTranscriptChunk = useCallback(({ text, tone }) => {
+  const handleTranscriptChunk = useCallback(({ text }) => {
     if (isMyTurnRef.current) {
       setInputText(prev => prev ? prev + ' ' + text : text);
     } else {
@@ -193,11 +183,9 @@ const DebateArena = ({
   const {
     isListening,
     interimText,
-    audioStream,
     voiceError,
     isSupported: voiceSupported,
     startListening,
-    stopListening: stopVoice,
     volume,
   } = useVoiceRecognition({
     onSubmit: handleVoiceSubmit,
@@ -260,6 +248,8 @@ const DebateArena = ({
           .eq('id', matchId)
           .maybeSingle(); // Use maybeSingle to avoid throw on missing record
 
+        if (error) throw error;
+
         if (match?.status === 'abandoned') {
           setErrorMsg('🔴 Arena Error: This match was abandoned due to disconnection. Redirecting to Explore...');
           setTimeout(() => navigate('/explore'), 3000);
@@ -298,7 +288,7 @@ const DebateArena = ({
     };
 
     initArena();
-  }, [matchId, user, initialTopic]);
+  }, [matchId, user, initialTopic, navigate]);
 
   const scrollToBottomSafe = () => {
     if (chatContainerRef.current) {
@@ -420,13 +410,13 @@ const DebateArena = ({
       setTimeout(() => navigate('/explore'), redirectDelay);
     };
 
-    const handleOpponentPaused = ({ role, message }) => {
+    const handleOpponentPaused = ({ message }) => {
       setIsPaused(true);
       setPauseMessage(message);
       setPauseCountdown(30);
     };
 
-    const handleMatchResumed = ({ role }) => {
+    const handleMatchResumed = () => {
       setIsPaused(false);
       setPauseMessage('');
     };
@@ -523,7 +513,7 @@ const DebateArena = ({
       socket.off('ai_intervention', handleAiResult);
       socket.off('cognitive_insight', handleCognitiveInsight);
     };
-  }, [socket, user, roomId, isSpectator]);
+  }, [socket, user, roomId, isSpectator, navigate, playerRole]);
 
   // Pause Countdown Effect
   useEffect(() => {
@@ -544,7 +534,7 @@ const DebateArena = ({
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = useCallback(() => {
     if (!inputText.trim() || matchStatus !== 'active') return;
     if (!playerRole || !activeSpeaker || playerRole.toLowerCase() !== activeSpeaker.toLowerCase()) return;
 
@@ -562,10 +552,12 @@ const DebateArena = ({
 
     setInputText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  };
+  }, [activeSpeaker, inputText, matchStatus, playerRole, roomId, socket]);
 
   // Keep ref in sync so voice callbacks always call the latest version
-  handleSendMessageRef.current = handleSendMessage;
+  useEffect(() => {
+    handleSendMessageRef.current = handleSendMessage;
+  }, [handleSendMessage]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -581,43 +573,6 @@ const DebateArena = ({
   };
 
   const isInputDisabled = matchStatus !== 'active' || playerRole !== activeSpeaker;
-
-  const buildTranscriptText = () =>
-    localTranscript.map(({ speaker, text }, i) => `Turn ${i + 1}\n${speaker}:\n${text}\n`).join('\n');
-
-  const downloadTxt = () => {
-    const blob = new Blob([buildTranscriptText()], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `debate-${Date.now()}.txt`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  const downloadPdf = () => {
-    if (!localTranscript.length) { window.alert('No transcript yet.'); return; }
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const pw = doc.internal.pageSize.getWidth();
-    const ph = doc.internal.pageSize.getHeight();
-    const m = 15;
-    let y = m;
-    const bg = () => { doc.setFillColor(15, 23, 42); doc.rect(0, 0, pw, ph, 'F'); };
-    bg();
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(241, 245, 249);
-    doc.text('Blitz Debate Transcript', m, y + 6); y += 15;
-    localTranscript.forEach(({ speaker, text }) => {
-      const lines = doc.splitTextToSize(text, pw - m * 2 - 20);
-      const h = lines.length * 4.5 + 12;
-      if (y + h > ph - m) { doc.addPage(); bg(); y = m; }
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(speaker === 'Critic' ? [253, 164, 175] : speaker === 'Defender' ? [165, 180, 252] : [203, 213, 225]);
-      doc.text(speaker.toUpperCase(), m + 6, y + 9);
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(241, 245, 249);
-      doc.text(lines, m + 6, y + 15);
-      y += h + 6;
-    });
-    doc.save(`debate-${Date.now()}.pdf`);
-  };
 
   // FAILSAFE 1: Error State
   if (errorMsg) {
@@ -645,7 +600,7 @@ const DebateArena = ({
       <div className="flex flex-col items-center justify-center min-h-[80vh] bg-[#0b0f19] text-slate-300">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
         <h2 className="text-xl font-bold">Entering the Arena...</h2>
-        <p className="text-sm text-slate-500 mt-2">Securing connection and verifying roles.</p>
+        <p className="text-sm text-slate-500 mt-2">{loadingMsg}</p>
       </div>
     );
   }
@@ -1000,8 +955,6 @@ const DebateArena = ({
                     isMyTurn={isMyTurn}
                     isDisabled={matchStatus !== 'active'}
                     onClick={startListening}
-                    interimText={interimText}
-                    scratchpadText={scratchpadText}
                     error={voiceError}
                   />
                 )}
