@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { ArrowLeft, Vote, Activity, Layers, Play, Clock, Swords, Trophy } from 'lucide-react';
@@ -15,8 +15,7 @@ const TopicMatches = ({ socket, user }) => {
   const [matches, setMatches] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`topic_matches_${decodedTitle}`)) || []; } catch { return []; }
   });
-  const [endedMatchIds, setEndedMatchIds] = useState(new Set());
-  const [topics, setTopics] = useState([]);
+  const endedMatchIdsRef = useRef(new Set());
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [topicDbEntry, setTopicDbEntry] = useState(null);
@@ -79,7 +78,7 @@ const TopicMatches = ({ socket, user }) => {
           });
         }
 
-        const filteredData = (matchesData || []).filter(m => !endedMatchIds.has(m.id));
+        const filteredData = (matchesData || []).filter(m => !endedMatchIdsRef.current.has(m.id));
         setMatches(filteredData);
       } catch (err) {
         console.error('Error fetching matches for topic:', err);
@@ -94,19 +93,11 @@ const TopicMatches = ({ socket, user }) => {
       console.log(`[TopicMatches] match_ended received for ${matchId}. Removing from local state.`);
       
       // Mark as ended locally to prevent it from being re-added by fetchMatches for the next 15 seconds
-      setEndedMatchIds(prev => {
-        const next = new Set(prev);
-        next.add(matchId);
-        return next;
-      });
+      endedMatchIdsRef.current.add(matchId);
 
       // Cleanup: remove from endedMatchIds after 15s
       setTimeout(() => {
-        setEndedMatchIds(prev => {
-          const next = new Set(prev);
-          next.delete(matchId);
-          return next;
-        });
+        endedMatchIdsRef.current.delete(matchId);
       }, 15000);
 
       setMatches(prev => prev.filter(m => m.id !== matchId));

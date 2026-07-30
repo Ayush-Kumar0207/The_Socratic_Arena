@@ -12,7 +12,7 @@ const Explore = ({ socket, user }) => {
   const [deliberatingMatches, setDeliberatingMatches] = useState(() => JSON.parse(localStorage.getItem('explore_deliberating')) || []);
   const [completedMatches, setCompletedMatches] = useState(() => JSON.parse(localStorage.getItem('explore_completed')) || []);
   const [liveMatches, setLiveMatches] = useState(() => JSON.parse(localStorage.getItem('explore_live')) || []);
-  const [endedMatchIds, setEndedMatchIds] = useState(new Set());
+  const endedMatchIdsRef = React.useRef(new Set());
   const [activeUserCounts, setActiveUserCounts] = useState(() => JSON.parse(localStorage.getItem('explore_counts')) || {});
   const [leaderboard, setLeaderboard] = useState(() => JSON.parse(localStorage.getItem('explore_leaderboard')) || []);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,7 +29,6 @@ const Explore = ({ socket, user }) => {
   const [deliberationFeedback, setDeliberationFeedback] = useState(null);
   const [completedFeedback, setCompletedFeedback] = useState(null);
   const [topicTotals, setTopicTotals] = useState(() => JSON.parse(localStorage.getItem('explore_totals')) || {});
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [followedIds, setFollowedIds] = useState(() => {
     try { return JSON.parse(localStorage.getItem('explore_followed_ids')) || []; } catch { return []; }
   });
@@ -47,6 +46,12 @@ const Explore = ({ socket, user }) => {
       .select('*')
       .eq('id', searchId.trim())
       .single();
+
+    if (error) {
+      console.error('[Explore] User search failed:', error.message);
+      setSearchError('User not found. Check the Socratic ID.');
+      return;
+    }
 
     if (data) {
       setSelectedProfile(data);
@@ -134,7 +139,7 @@ const Explore = ({ socket, user }) => {
           const createdAt = new Date(match.created_at);
           const ageInMinutes = (now - createdAt) / (1000 * 60);
           // Filter out matches older than 15 mins OR matches we know have ended
-          return ageInMinutes < 15 && !endedMatchIds.has(match.id);
+          return ageInMinutes < 15 && !endedMatchIdsRef.current.has(match.id);
         });
 
         setLiveMatches(filteredLive);
@@ -193,26 +198,17 @@ const Explore = ({ socket, user }) => {
     fetchFollows();
 
     const interval = setInterval(fetchLive, 30000);
-    const timerInterval = setInterval(() => setCurrentTime(new Date()), 1000);
 
     // Real-time listener: Instantly remove ended matches from Live Arenas
     const handleMatchEnded = ({ matchId }) => {
       console.log(`[Explore] match_ended received for ${matchId}. Removing from Live Arenas.`);
 
       // Mark as ended locally to prevent it from being re-added by fetchLive for the next 15 seconds
-      setEndedMatchIds(prev => {
-        const next = new Set(prev);
-        next.add(matchId);
-        return next;
-      });
+      endedMatchIdsRef.current.add(matchId);
 
       // Simple cleanup: remove from endedMatchIds after 15s
       setTimeout(() => {
-        setEndedMatchIds(prev => {
-          const next = new Set(prev);
-          next.delete(matchId);
-          return next;
-        });
+        endedMatchIdsRef.current.delete(matchId);
       }, 15000);
 
       setLiveMatches(prev => {
@@ -229,7 +225,6 @@ const Explore = ({ socket, user }) => {
 
     return () => {
       clearInterval(interval);
-      clearInterval(timerInterval);
       if (socket) {
         socket.off('match_ended', handleMatchEnded);
       }
@@ -259,21 +254,7 @@ const Explore = ({ socket, user }) => {
     return () => socket.off('global_announcement', handleAnnouncement);
   }, [socket, user]);
 
-  // This useEffect was previously the first one, now it's the third.
-  // It was also modified to remove the fetch calls that are now in the first useEffect.
   useEffect(() => {
-    // Setup global timer for deliberation card countdowns
-    const timerInterval = setInterval(() => setCurrentTime(new Date()), 1000);
-
-    const interval = setInterval(() => {
-      // These fetches are now handled by the first useEffect's interval or are called once
-      // fetchLeaderboard();
-      // fetchDeliberating();
-      // fetchLive(); // Changed to fetchLive
-      // fetchTopicTotals();
-    }, 10000); // This interval is now redundant if fetchLiveMatches is called every 5s in the first useEffect.
-               // I'll remove the interval setup here to avoid duplicate intervals.
-    
     const handleNewTopicAdded = async () => {
       const { data, error } = await supabase
         .from('topics')
@@ -281,24 +262,18 @@ const Explore = ({ socket, user }) => {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error("[Explore] Topics Fetch Error:", error.message, error.details);
-      }
-      if (!error && data) {
+        console.error('[Explore] Topics Fetch Error:', error.message, error.details);
+      } else if (data) {
         setTopics(data);
         localStorage.setItem('explore_topics', JSON.stringify(data));
       }
     };
 
-    if (socket) {
-      socket.on('new_topic_added', handleNewTopicAdded);
-    }
-
+    if (socket) socket.on('new_topic_added', handleNewTopicAdded);
     return () => {
-      clearInterval(timerInterval);
-      clearInterval(interval);
       if (socket) socket.off('new_topic_added', handleNewTopicAdded);
     };
-  }, [socket]); // Dependencies adjusted
+  }, [socket]);
 
   // Follow / Unfollow toggle with optimistic UI and lock
   const toggleFollow = async (topicId) => {
@@ -346,21 +321,6 @@ const Explore = ({ socket, user }) => {
         return next;
       });
     }
-  };
-
-  const formatTimeLeft = (createdAt) => {
-    const end = new Date(createdAt).getTime() + (24 * 60 * 60 * 1000);
-    const now = currentTime.getTime();
-    const diff = end - now;
-    if (diff <= 0) return { expired: true, text: "00:00:00" };
-
-    const h = Math.floor(diff / (1000 * 60 * 60));
-    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const s = Math.floor((diff % (1000 * 60)) / 1000);
-    return {
-      expired: false,
-      text: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-    };
   };
 
   // Search & Create: auto-filter on duplicate OR success clear
@@ -868,7 +828,7 @@ const Explore = ({ socket, user }) => {
                 return scoreB - scoreA;
               })
               .slice(0, 5)
-              .map((topic, index) => (
+              .map((topic) => (
                 <div
                   key={topic.id}
                   className="bg-slate-900/50 backdrop-blur-md border border-[#1e293b] rounded-2xl p-6 transition-all duration-300 hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(34,211,238,0.1)] hover:-translate-y-1 flex flex-col h-full"

@@ -20,7 +20,6 @@ const Lobby = ({ socket, user }) => {
   const [opponentStance, setOpponentStance] = useState(null);
   const [copied, setCopied] = useState(false);
   const [privateError, setPrivateError] = useState(null);
-  const [isSocketConnected, setIsSocketConnected] = useState(socket?.connected || false);
 
 
 
@@ -68,7 +67,7 @@ const Lobby = ({ socket, user }) => {
       setPrivateError(null);
     };
 
-    const handleArenaJoined = ({ arenaId: id, creatorId, joinerId, topicTitle }) => {
+    const handleArenaJoined = ({ arenaId: id, creatorId, joinerId }) => {
       setArenaId(id);
       setIsPaired(true);
       setPrivateError(null);
@@ -111,7 +110,6 @@ const Lobby = ({ socket, user }) => {
     };
 
     const handleStatusChange = () => {
-      setIsSocketConnected(socket.connected);
       // If we just connected and don't have an arena code yet, try again
       if (socket.connected) {
         if (!incomingArenaCode) {
@@ -159,7 +157,7 @@ const Lobby = ({ socket, user }) => {
       socket.off('private_arena_stance_update', handleStanceUpdate);
       socket.off('private_arena_error', handlePrivateError);
     };
-  }, [socket, navigate, incomingArenaCode, topic.id, topic.title]);
+  }, [socket, navigate, incomingArenaCode, topic.id, topic.title, stances, user?.id]);
 
   // Broadcast stance changes when paired
   useEffect(() => {

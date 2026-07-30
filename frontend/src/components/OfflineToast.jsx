@@ -5,23 +5,24 @@ const OfflineToast = ({ session }) => {
   const [isVisible, setIsVisible] = useState(false);
   const hasTriggeredThisLife = useRef(false);
 
+  const userId = session?.user?.id;
+
   // 1. THE TRIGGER: Decide if we should show the toast
   useEffect(() => {
-    if (session?.user?.id) {
-      const alreadyShown = sessionStorage.getItem('hasSeenNeuralLinkThisSession');
-      
-      if (!alreadyShown && !hasTriggeredThisLife.current) {
-        hasTriggeredThisLife.current = true;
-        sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
-        setIsVisible(true);
-      }
-    } else {
-      // User logged out: Reset everything
+    if (!userId) {
       sessionStorage.removeItem('hasSeenNeuralLinkThisSession');
       hasTriggeredThisLife.current = false;
-      setIsVisible(false);
+      return;
     }
-  }, [session]);
+
+    const alreadyShown = sessionStorage.getItem('hasSeenNeuralLinkThisSession');
+    if (alreadyShown || hasTriggeredThisLife.current) return;
+
+    hasTriggeredThisLife.current = true;
+    sessionStorage.setItem('hasSeenNeuralLinkThisSession', 'true');
+    const showTimer = setTimeout(() => setIsVisible(true), 0);
+    return () => clearTimeout(showTimer);
+  }, [userId]);
 
   // 2. THE LIFECYCLE: Wait 6s before unmounting to ensure the 5s CSS fade finishes completely
   useEffect(() => {
@@ -31,7 +32,7 @@ const OfflineToast = ({ session }) => {
     }
   }, [isVisible]);
 
-  if (!isVisible) return null;
+  if (!userId || !isVisible) return null;
 
   return (
     <div className="fixed top-4 sm:top-6 left-1/2 -translate-x-1/2 z-[200] pointer-events-none w-[calc(100vw-1rem)] sm:w-auto px-2 sm:px-0">

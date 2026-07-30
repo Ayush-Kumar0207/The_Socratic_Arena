@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Lock } from 'lucide-react';
 
 /**
@@ -19,12 +18,8 @@ const VoiceOrb = ({
   isMyTurn,           // Whether it's the current user's turn
   isDisabled,         // Full disable (e.g., spectator or match over)
   onClick,            // Toggle mic on/off
-  interimText,        // Live interim voice text for visual feedback
-  scratchpadText,     // Scratchpad text (shown in locked mode)
   error,              // Error message from voice recognition
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
   // Derive visual state
   const isActive = isListening && isMyTurn;
   const isLocked = isListening && !isMyTurn;
