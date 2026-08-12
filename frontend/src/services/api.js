@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from '../lib/supabaseClient';
 
 /**
  * Centralized Axios client for all backend API calls.
@@ -13,6 +14,15 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+// Arena OS endpoints are authenticated by the same Supabase session used by
+// realtime matches. Resolving the token per request also handles refreshes.
+api.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
 });
 
 export default api;

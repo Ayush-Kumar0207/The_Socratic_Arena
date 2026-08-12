@@ -1,4 +1,4 @@
-import { Users, Clock, Shield, Swords, ArrowRight, Shuffle, Sparkles, AlertCircle, X, Copy, CheckCircle2, Link2 } from 'lucide-react';
+import { Users, Clock, Shield, Swords, ArrowRight, Shuffle, Sparkles, AlertCircle, X, Copy, CheckCircle2, Link2, Bot } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { generateStances } from '../utils/stanceUtils';
@@ -20,7 +20,6 @@ const Lobby = ({ socket, user }) => {
   const [opponentStance, setOpponentStance] = useState(null);
   const [copied, setCopied] = useState(false);
   const [privateError, setPrivateError] = useState(null);
-  const [isSocketConnected, setIsSocketConnected] = useState(socket?.connected || false);
 
 
 
@@ -68,7 +67,7 @@ const Lobby = ({ socket, user }) => {
       setPrivateError(null);
     };
 
-    const handleArenaJoined = ({ arenaId: id, creatorId, joinerId, topicTitle }) => {
+    const handleArenaJoined = ({ arenaId: id, creatorId, joinerId }) => {
       setArenaId(id);
       setIsPaired(true);
       setPrivateError(null);
@@ -111,7 +110,6 @@ const Lobby = ({ socket, user }) => {
     };
 
     const handleStatusChange = () => {
-      setIsSocketConnected(socket.connected);
       // If we just connected and don't have an arena code yet, try again
       if (socket.connected) {
         if (!incomingArenaCode) {
@@ -159,7 +157,7 @@ const Lobby = ({ socket, user }) => {
       socket.off('private_arena_stance_update', handleStanceUpdate);
       socket.off('private_arena_error', handlePrivateError);
     };
-  }, [socket, navigate, incomingArenaCode, topic.id, topic.title]);
+  }, [socket, navigate, incomingArenaCode, topic.id, topic.title, stances, user?.id]);
 
   // Broadcast stance changes when paired
   useEffect(() => {
@@ -376,6 +374,16 @@ const Lobby = ({ socket, user }) => {
                       }`} />
                     <span>{isPaired ? 'Start Debate' : 'Enter Arena'}</span>
                     <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
+                  </button>
+                )}
+
+                {!isPaired && (
+                  <button
+                    onClick={() => navigate(`/practice?${new URLSearchParams({ mode: 'sparring', topic: topic.title, stance: selectedRole === 'Critic' ? 'against' : 'for' }).toString()}`)}
+                    className="w-full sm:w-80 flex items-center justify-center gap-2 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 px-6 py-3 rounded-xl border border-violet-500/30 transition-all text-sm font-bold"
+                  >
+                    <Bot className="h-4 w-4" />
+                    Practice instantly with AI
                   </button>
                 )}
 

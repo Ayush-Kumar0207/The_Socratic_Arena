@@ -126,6 +126,17 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 
 ## ✨ Features
 
+### 🧠 Arena OS — Competitive Reasoning Network
+- **Blind multi-judge panel** — independent logic, evidence, and communication judges with median aggregation, agreement, confidence, uncertainty, factual-claim flags, and versioned audit records.
+- **Longitudinal Reasoning Profile** — tracks 11 skills and prescribes a focused daily drill after every performance.
+- **Instant AI Sparring** — an AI opponent is always available from matchmaking, with a deterministic local fallback during model outages.
+- **Seasons, Format Ratings, Tournaments & Clubs** — persistent competitive identity beyond a single global Elo.
+- **Education Workspace** — classrooms, join codes, assignments, custom rubrics, randomized positions, AI-use policies, and integrity reporting.
+- **Professional Simulations** — sales, negotiation, design review, investor, and policy challenge rooms.
+- **Trust & Safety** — result appeals, judge-version tracking, moderation reports, fairness checks, and portable credential storage.
+
+Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
+
 ### 🎯 Core Debate Engine
 - **Real-time 1v1 debates** via WebSocket with server-authoritative turn management.
 - **Dynamic Stance Mapping** — Automatically parses debate topics (e.g., "Veg vs Non-Veg") to generate tailored, context-aware mission objectives for each role.
@@ -359,8 +370,9 @@ cd frontend && npm install && npm run dev
 
 1. Create a new project on [Supabase](https://supabase.com)
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
-3. Enable Row Level Security as needed
-4. Copy your project URL and service key into `backend/.env`
+3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/004_arena_os.sql` in numeric order (existing deployments can apply only unapplied migrations)
+4. Review the included Row Level Security policies for your organization’s privacy requirements
+5. Copy your project URL and service key into `backend/.env`
 
 ---
 

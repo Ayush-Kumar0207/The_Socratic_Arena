@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { ArrowLeft, User, Clock, Trophy, Vote, BarChart3, Target, Play, Square, Loader2, Share2, Download, Sparkles, Quote } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import TrustResultPanel from './TrustResultPanel';
 
 const MatchReview = () => {
   const { matchId } = useParams();
@@ -15,7 +16,7 @@ const MatchReview = () => {
   const [currentUser, setCurrentUser] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
-  const [popularTopics, setPopularTopics] = useState([]);
+  const [, setPopularTopics] = useState([]);
   const [displayedTranscript, setDisplayedTranscript] = useState([]);
   const isPlayingRef = useRef(false);
   const messagesEndRef = useRef(null);
@@ -248,14 +249,15 @@ const MatchReview = () => {
   }, [matchId]);
 
   const hasScrolledRef = useRef(false);
+  const matchTranscript = match?.transcript;
 
   // Auto-scroll to bottom only once when transcript initial load happens
   useEffect(() => {
-    if (match && match.transcript && !hasScrolledRef.current) {
+    if (matchTranscript && !hasScrolledRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       hasScrolledRef.current = true;
     }
-  }, [match?.transcript]);
+  }, [matchTranscript]);
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -338,7 +340,7 @@ const MatchReview = () => {
     }
   };
 
-  const handleResolveMatch = async () => {
+  const _handleResolveMatch = async () => {
     if (!match || isResolving) return;
 
     console.log('🧪 [ELO TEST] Starting match resolution...');
@@ -814,6 +816,8 @@ const MatchReview = () => {
               </div>
             </div>
           </div>
+
+          <TrustResultPanel match={match} currentUser={currentUser} />
 
           {/* Audience Sentiment (Added Below AI Radar) */}
           <div className="bg-[#0b0f19] p-6 rounded-xl border border-slate-800 shadow-lg mt-8">

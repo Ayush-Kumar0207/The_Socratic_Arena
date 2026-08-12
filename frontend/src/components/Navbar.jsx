@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, Bell } from 'lucide-react';
+import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, BrainCircuit } from 'lucide-react';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
@@ -10,11 +10,6 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isActive = (path) => location.pathname === path;
-
-  // Close menu on route change
-  useEffect(() => {
-    setIsMenuOpen(false);
-  }, [location.pathname]);
 
   return (
     <>
@@ -46,6 +41,12 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/my-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
               >
                 <Swords className="h-4 w-4" /> My Arena
+              </Link>
+              <Link
+                to="/arena-os"
+                className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/arena-os') || isActive('/practice') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+              >
+                <BrainCircuit className="h-4 w-4" /> Arena OS
               </Link>
             </div>
           )}
@@ -111,6 +112,10 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
             <Link to="/my-arena" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/my-arena') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
               <Swords className="h-5 w-5" />
               <span className="font-semibold text-lg">My Arena</span>
+            </Link>
+            <Link to="/arena-os" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/arena-os') || isActive('/practice') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>
+              <BrainCircuit className="h-5 w-5" />
+              <span className="font-semibold text-lg">Arena OS</span>
             </Link>
           </div>
 
