@@ -1631,7 +1631,9 @@ const TrustTab = ({ data, onReport }) => (
         <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-5 text-amber-200/80">
           <CircleAlert className="mr-2 inline h-4 w-4" />
           AI scores remain probabilistic. A dimension is labelled measured only
-          after a stored, reproducible benchmark run.
+          after a stored, reproducible benchmark run. The current small
+          calibration set is a regression gate, not proof of population-wide
+          fairness.
         </div>
       </Card>
       <Card className="p-6">
@@ -1738,6 +1740,10 @@ const TrustOperations = ({
           Dataset {data.trust.benchmark.dataset_version} · n=
           {data.trust.benchmark.dataset_size} · accuracy{" "}
           {Number(data.trust.benchmark.accuracy).toFixed(1)}%
+          <div className="mt-1 text-[10px] leading-4 text-emerald-100/60">
+            Reproducible regression evidence; not a population-wide scientific
+            fairness claim.
+          </div>
         </div>
       )}
     </Card>

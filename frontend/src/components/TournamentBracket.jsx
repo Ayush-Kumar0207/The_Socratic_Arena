@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CheckCircle2, Loader2, Play, Trophy } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Link2,
+  Loader2,
+  Play,
+  ShieldCheck,
+  Trophy,
+} from "lucide-react";
 import api from "../services/api";
 
 const TournamentBracket = ({ user }) => {
@@ -10,6 +18,7 @@ const TournamentBracket = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [matchIds, setMatchIds] = useState({});
 
   const load = useCallback(async () => {
     try {
@@ -73,17 +82,19 @@ const TournamentBracket = ({ user }) => {
     }
   };
 
-  const report = async (fixture, winnerId) => {
+  const verifyResult = async (fixture) => {
+    const matchId = matchIds[fixture.id]?.trim();
+    if (!matchId) {
+      setError("Paste the completed Socratic match ID to verify this fixture.");
+      return;
+    }
     setBusy(fixture.id);
     try {
       await api.post(
         `/product/tournaments/${tournamentId}/fixtures/${fixture.id}/result`,
-        {
-          winner_id: winnerId,
-          score_player1: winnerId === fixture.player1_id ? 1 : 0,
-          score_player2: winnerId === fixture.player2_id ? 1 : 0,
-        },
+        { match_id: matchId },
       );
+      setMatchIds((current) => ({ ...current, [fixture.id]: "" }));
       await load();
     } catch (requestError) {
       setError(
@@ -181,16 +192,9 @@ const TournamentBracket = ({ user }) => {
                     <div className="space-y-2">
                       {[fixture.player1_id, fixture.player2_id].map(
                         (playerId, index) => (
-                          <button
+                          <div
                             key={playerId || `empty-${index}`}
-                            disabled={
-                              !canManage ||
-                              fixture.status !== "ready" ||
-                              !playerId ||
-                              Boolean(busy)
-                            }
-                            onClick={() => report(fixture, playerId)}
-                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${fixture.winner_id === playerId ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-900 text-slate-300"} disabled:cursor-default`}
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${fixture.winner_id === playerId ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-900 text-slate-300"}`}
                           >
                             <span>
                               {playerId
@@ -201,12 +205,53 @@ const TournamentBracket = ({ user }) => {
                             {fixture.winner_id === playerId && (
                               <CheckCircle2 className="h-4 w-4" />
                             )}
-                          </button>
+                          </div>
                         ),
                       )}
                     </div>
+                    {canManage && fixture.status === "ready" && (
+                      <div className="mt-3 space-y-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-2">
+                        <label className="block text-[10px] font-black uppercase tracking-wider text-cyan-300">
+                          Completed match ID
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            value={matchIds[fixture.id] || ""}
+                            onChange={(event) =>
+                              setMatchIds((current) => ({
+                                ...current,
+                                [fixture.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="UUID"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 font-mono text-xs outline-none focus:border-cyan-500"
+                          />
+                          <button
+                            onClick={() => verifyResult(fixture)}
+                            disabled={Boolean(busy) || !matchIds[fixture.id]?.trim()}
+                            title="Verify the server-finalized winner"
+                            className="rounded-lg bg-cyan-400 px-3 text-slate-950 disabled:opacity-40"
+                          >
+                            {busy === fixture.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Link2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-[10px] leading-4 text-slate-500">
+                          The server checks both competitors and reads the actual
+                          winner. Manual winners and scores are never accepted.
+                        </p>
+                      </div>
+                    )}
+                    {fixture.result_source === "verified_match" && (
+                      <div className="mt-3 flex items-center gap-2 rounded-lg bg-emerald-500/10 p-2 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Match verified
+                      </div>
+                    )}
                     <div className="mt-3 text-center text-[10px] font-bold uppercase tracking-wider text-slate-600">
-                      {busy === fixture.id ? "Saving result…" : fixture.status}
+                      {busy === fixture.id ? "Verifying result…" : fixture.status}
                     </div>
                   </div>
                 ))}

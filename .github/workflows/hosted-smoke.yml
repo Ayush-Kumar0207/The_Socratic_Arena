@@ -1,0 +1,30 @@
+name: Hosted Dependency Smoke
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-dependency-smoke
+  cancel-in-progress: false
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify Vercel, Render, Supabase, and Redis
+        working-directory: backend
+        env:
+          HOSTED_FRONTEND_URL: ${{ vars.HOSTED_FRONTEND_URL || 'https://socratic-arena.vercel.app' }}
+          HOSTED_BACKEND_URL: ${{ vars.HOSTED_BACKEND_URL }}
+          HOSTED_SMOKE_REQUIRE_REDIS: 'true'
+        run: npm run smoke:hosted

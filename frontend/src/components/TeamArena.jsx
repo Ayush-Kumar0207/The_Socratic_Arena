@@ -67,6 +67,23 @@ const TeamArena = () => {
     }
   };
 
+  const retryJudging = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.post(`/product/team-debates/${debateId}/judge`);
+      await load();
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "The blind judge panel is still unavailable.",
+      );
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading)
     return (
       <div className="flex min-h-[70vh] items-center justify-center bg-slate-950">
@@ -177,11 +194,36 @@ const TeamArena = () => {
               )}
             </div>
             {data.debate.status === "completed" ? (
-              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-amber-500/10 p-4 font-black text-amber-300">
-                <Trophy className="h-5 w-5" />{" "}
-                {data.debate.winning_side === "draw"
-                  ? "The panel scored a draw"
-                  : `${data.debate.winning_side} wins`}
+              <div className="mt-4 rounded-xl bg-amber-500/10 p-4 text-amber-300">
+                <div className="flex items-center justify-center gap-2 font-black">
+                  <Trophy className="h-5 w-5" />{" "}
+                  {data.debate.winning_side === "draw"
+                    ? "The panel scored a draw"
+                    : `${data.debate.winning_side} wins`}
+                </div>
+                <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-wider text-amber-200/60">
+                  Blind 3-judge median panel · {data.debate.judge_version}
+                </div>
+              </div>
+            ) : data.debate.status === "judging" ? (
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm font-bold text-cyan-200">
+                <Loader2 className="h-5 w-5 animate-spin" /> Three independent
+                judges are scoring the blind transcript…
+              </div>
+            ) : data.debate.status === "judging_failed" ? (
+              <div className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 p-4 text-sm text-rose-200">
+                <p>
+                  No winner was declared because all three judge verdicts were
+                  not available.
+                </p>
+                <button
+                  onClick={retryJudging}
+                  disabled={busy}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white py-2.5 font-black text-slate-950 disabled:opacity-50"
+                >
+                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Retry
+                  blind panel
+                </button>
               </div>
             ) : (
               <form onSubmit={submit} className="mt-4">

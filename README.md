@@ -370,7 +370,7 @@ cd frontend && npm install && npm run dev
 
 1. Create a new project on [Supabase](https://supabase.com)
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
-3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/005_launch_readiness.sql` in numeric order (existing deployments can apply only unapplied migrations)
+3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/006_final_integrity.sql` in numeric order (existing deployments can apply only unapplied migrations)
 4. Review the included Row Level Security policies for your organization’s privacy requirements
 5. Copy your project URL and service key into `backend/.env`
 
@@ -378,7 +378,7 @@ cd frontend && npm install && npm run dev
 
 ## Observability
 
-The backend exposes Prometheus metrics at `GET /metrics` and a health probe at `GET /health`. A local monitoring stack is included under `observability/` with Prometheus, Grafana, and Alertmanager.
+The backend exposes Prometheus metrics at `GET /metrics`, a liveness probe at `GET /health`, and a dependency-readiness probe at `GET /ready`. Readiness verifies Supabase plus both Redis-backed realtime coordination and global rate limiting when Redis is configured. A scheduled GitHub Actions smoke test calls the deployed Vercel frontend and Render readiness endpoint daily without spending Gemini quota.
 
 ```bash
 # Terminal 1: backend metrics source
@@ -425,10 +425,10 @@ Robustness proof, screenshots, and raw results: [`docs/robustness/README.md`](do
 - [ ] AI Judge Lifeline — Summon the AI to fact-check mid-debate (Objection System)
 - [x] Pragmatic Affective Engine v2 — Tone detection, auto-punctuation, and visual auras
 - [x] Dynamic Stance Mapping — tailored objectives for comparitive topics
-- [ ] AI Highlights — Automatically generate and extract key turning points from debates
-- [ ] PDF & Text Export — Download professional-grade debate transcripts
-- [ ] Tournament brackets with elimination rounds
-- [ ] Team debates (2v2)
+- [x] AI Highlights — Automatically generate and extract key turning points from debates
+- [x] PDF & Text Export — Download professional-grade debate transcripts
+- [x] Tournament brackets with match-verified elimination rounds
+- [x] Team debates (2v2) with the blind three-judge panel
 - [ ] Mobile-native app (React Native)
 - [ ] Public API for third-party integrations
 
