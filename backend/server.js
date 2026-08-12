@@ -116,13 +116,16 @@ import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 
 // Import API routes so HTTP endpoints can be mounted under /api.
-import apiRoutes from './routes/apiRoutes.js';
+import createApiRoutes from './routes/apiRoutes.js';
 import createProductRoutes from './routes/productRoutes.js';
 
 // Import Supabase client for database operations
 import { supabase } from './lib/supabaseClient.js';
 import { analyzeCognitiveTurn, extractCognitiveInsights } from './lib/cognitiveEngine.js';
 import { aggregateJudgeVerdicts, computeReasoningProfile } from './lib/reasoningProfile.js';
+import { buildDebateHighlights, computeCohortPercentile } from './lib/platformWorkflows.js';
+import { createRealtimeCoordinator } from './lib/realtimeState.js';
+import { createRateLimit } from './lib/rateLimit.js';
 import {
   metricsHandler,
   observeHttpRequests,
@@ -169,11 +172,18 @@ async function refreshReasoningProfiles(matchId) {
     if (error || !match) return;
     const userIds = [match.critic_id, match.defender_id].filter(Boolean);
     await Promise.all(userIds.map(async (userId) => {
-      const [{ data: matches }, { data: stored }] = await Promise.all([
+      const [{ data: matches }, { data: stored }, { data: cohortProfiles }] = await Promise.all([
         supabase.from('matches').select('id, critic_id, defender_id, ai_scores, created_at').or(`critic_id.eq.${userId},defender_id.eq.${userId}`).not('ai_scores', 'is', null).order('created_at', { ascending: false }).limit(80),
         supabase.from('reasoning_profiles').select('*').eq('user_id', userId).maybeSingle(),
+        supabase.from('reasoning_profiles').select('user_id,overall').gt('match_count', 0),
       ]);
       const profile = computeReasoningProfile(matches || [], userId, stored || null);
+      const cohortScores = (cohortProfiles || []).filter(item => item.user_id !== userId).map(item => item.overall);
+      cohortScores.push(profile.overall);
+      const cohort = computeCohortPercentile(profile.overall, cohortScores);
+      profile.percentile = cohort.percentile;
+      profile.cohort_size = cohort.cohortSize;
+      profile.percentile_updated_at = new Date().toISOString();
       const { error: profileError } = await supabase.from('reasoning_profiles').upsert({ user_id: userId, ...profile });
       if (profileError && !profileError.message?.includes('reasoning_profiles')) console.warn('[Reasoning Profile] Update failed:', profileError.message);
     }));
@@ -226,11 +236,12 @@ ${debateText}`;
 
     try {
       const scoresOnly = aiResponse;
+      const highlights = buildDebateHighlights(transcript);
 
       // 3. Update Supabase
       const { error: updateError } = await supabase.from('matches').update({
         ai_scores: scoresOnly,
-        highlights: []
+        highlights
       }).eq('id', matchId);
 
       if (updateError) {
@@ -665,10 +676,18 @@ app.post('/api/alerts/prometheus', async (req, res) => {
 
 // Mount all API routes under a versionable base path.
 // Example: POST /api/debate
-app.use('/api', apiRoutes);
+app.use('/api', createApiRoutes({ supabase }));
 app.use('/api/product', createProductRoutes({ supabase, generateWithRetry, advancedAi: ENABLE_ADVANCED_AI }));
+const authenticateHttp = async (req, res, next) => {
+  const token = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return res.status(401).json({ success: false, message: 'Authentication required' });
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) return res.status(401).json({ success: false, message: 'Session expired' });
+  req.user = data.user;
+  return next();
+};
 // Endpoint to dynamically generate and save a 1-liner crux summary for a match
-app.post('/api/matches/:id/summary', async (req, res) => {
+app.post('/api/matches/:id/summary', authenticateHttp, createRateLimit({ name: 'match-summary', max: 10, windowMs: 10 * 60_000 }), async (req, res) => {
   const { id } = req.params;
   try {
     const { data: match, error } = await supabase.from('matches').select('transcript, ai_scores').eq('id', id).single();
@@ -711,17 +730,23 @@ app.post('/api/matches/:id/summary', async (req, res) => {
  * Admin: Broadcast System Notification to All Users
  * ---------------------------------------------------------------------------
  * POST /api/admin/broadcast-notification
- * Body: { title, message, type?, metadata?, adminSecret }
+ * Authorization: Bearer <ADMIN_SECRET>
+ * Body: { title, message, type?, metadata? }
  *
  * Creates a notification for ALL users in the database and triggers
  * real-time refresh for all connected sockets.
  */
 app.post('/api/admin/broadcast-notification', async (req, res) => {
   try {
-    const { title, message, type = 'system_announcement', metadata = {}, adminSecret } = req.body;
-
-    // Basic admin authentication via secret key
-    if (adminSecret !== process.env.ADMIN_SECRET) {
+    const { title, message, type = 'system_announcement', metadata = {} } = req.body;
+    const configuredSecret = process.env.ADMIN_SECRET;
+    if (!configuredSecret || (process.env.NODE_ENV === 'production' && configuredSecret.length < 32)) {
+      return res.status(503).json({ success: false, message: 'Administrative access is not configured safely.' });
+    }
+    const suppliedSecret = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim() || '';
+    const supplied = Buffer.from(suppliedSecret);
+    const expected = Buffer.from(configuredSecret);
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
 
@@ -800,6 +825,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     appVersion: APP_VERSION,
     uptimeSeconds: Math.round(process.uptime()),
+    realtime: realtimeCoordinator?.health?.() || { mode: 'initializing', connected: false },
   });
 });
 
@@ -823,7 +849,14 @@ const io = new SocketIOServer(httpServer, {
     origin: CLIENT_ORIGIN,
     methods: ['GET', 'POST'],
   },
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 30_000,
+    skipMiddlewares: false,
+  },
 });
+
+const realtimeCoordinator = await createRealtimeCoordinator({ io });
+console.log(`[Realtime] ${realtimeCoordinator.enabled ? 'Redis distributed coordination enabled' : 'Single-instance fallback active'}`);
 
 // Make io available in controllers via req.app.get('io').
 app.set('io', io);
@@ -1005,12 +1038,22 @@ const ensureProfilesExist = async (userIds, options = {}) => {
 /**
  * Server-Side Referee: Start timer for a specific room
  */
-const startRoomTimer = (roomId) => {
+const startRoomTimer = async (roomId) => {
   if (roomTimers[roomId]) {
     clearInterval(roomTimers[roomId]);
   }
 
+  if (!(await realtimeCoordinator.acquireTimerLease(roomId))) {
+    console.log(`[Timer] Instance ${realtimeCoordinator.instanceId} did not acquire lease for ${roomId}.`);
+    return;
+  }
+
   roomTimers[roomId] = setInterval(async () => {
+    if (!(await realtimeCoordinator.renewTimerLease(roomId))) {
+      clearInterval(roomTimers[roomId]);
+      delete roomTimers[roomId];
+      return;
+    }
     const room = activeRooms[roomId];
     if (!room || room.status !== 'active') {
       clearInterval(roomTimers[roomId]);
@@ -1103,6 +1146,8 @@ const startRoomTimer = (roomId) => {
         cleanupRoom(roomId);
         console.log(`[Timer] Room ${roomId} memory purged after timeout.`);
       }, 5000);
+    } else if (room.criticTime % 5 === 0 || room.defenderTime % 5 === 0) {
+      await realtimeCoordinator.saveRoom(roomId, room);
     }
   }, 1000);
 };
@@ -1119,8 +1164,14 @@ const cleanupRoom = (roomId) => {
     Object.values(gracePeriodTimeouts[roomId]).forEach(timeout => clearTimeout(timeout));
     delete gracePeriodTimeouts[roomId];
   }
-  const roomExisted = Boolean(activeRooms[roomId]);
+  const room = activeRooms[roomId];
+  const roomExisted = Boolean(room);
   delete activeRooms[roomId];
+  for (const socketId of Object.values(room?.players || {})) {
+    realtimeCoordinator.clearSocketRoom(socketId).catch(() => {});
+  }
+  realtimeCoordinator.deleteRoom(roomId).catch(error => console.warn('[Realtime] Room cleanup failed:', error.message));
+  realtimeCoordinator.releaseTimerLease(roomId).catch(() => {});
   if (roomExisted) recordMatchEvent('cleaned_up');
   refreshRuntimeGauges();
 };
@@ -1277,14 +1328,21 @@ const resolveAbandonedMatch = async (matchId, leaverRole) => {
 
 /**
  * Cleanup Zombie Matches
- * Marks any 'active' match in DB as 'abandoned' on server startup
+ * Marks only stale active matches as abandoned. Fresh rooms may be owned by a
+ * different horizontally scaled instance and must survive deploys/restarts.
  */
 const cleanupZombieMatches = async () => {
   console.log('[startup] Cleaning up zombie matches...');
-  const { error } = await supabase
+  const staleBefore = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+  const { data: staleMatches, error: readError } = await supabase
     .from('matches')
-    .update({ status: 'abandoned' })
-    .eq('status', 'active');
+    .select('id')
+    .eq('status', 'active')
+    .lt('created_at', staleBefore)
+    .limit(500);
+  const { error } = readError || !staleMatches?.length
+    ? { error: readError }
+    : await supabase.from('matches').update({ status: 'abandoned' }).in('id', staleMatches.map(match => match.id));
 
   if (error) {
     console.error('[startup] Zombie cleanup error:', error);
@@ -1402,6 +1460,21 @@ io.use(async (socket, next) => {
     }
     socket.verifiedUserId = user.id;
 
+    const now = new Date().toISOString();
+    const { data: restriction, error: restrictionError } = await supabase
+      .from('moderation_actions')
+      .select('action_type,expires_at')
+      .eq('user_id', user.id)
+      .in('action_type', ['suspension', 'ban'])
+      .is('revoked_at', null)
+      .or(`expires_at.is.null,expires_at.gt.${now}`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!restrictionError && restriction) {
+      return next(new Error(`Account access is ${restriction.action_type === 'ban' ? 'banned' : 'suspended'}.`));
+    }
+
     // Non-blocking profile provisioning keeps auth snappy while still healing missing profiles.
     const usernameHint = user.user_metadata?.username || user.email?.split('@')[0] || null;
     void ensureProfileExists(user.id, usernameHint)
@@ -1428,6 +1501,8 @@ io.on('connection', (socket) => {
   // Register user in socket map for targeted notifications
   if (socket.verifiedUserId) {
     addUserSocket(socket.verifiedUserId, socket.id);
+    socket.join(`user:${socket.verifiedUserId}`);
+    realtimeCoordinator.setPresence(socket.verifiedUserId, socket.id).catch(error => console.warn('[Realtime] Presence write failed:', error.message));
     console.log(`[userSocketMap] Registered ${socket.id} for user ${socket.verifiedUserId}`);
   }
 
@@ -1460,12 +1535,11 @@ io.on('connection', (socket) => {
     const userId = socket.verifiedUserId;
     console.log(`[matchmaking] 👤 User ${userId} joined queue for ${topicId} as ${preferredRole}`);
 
-    // Prevent duplicate joins
-    for (const queue of Object.values(waitingQueues)) {
-      if (queue.some(p => p.socketId === socket.id)) return;
-    }
+    // Prevent duplicate joins in either the local fallback or Redis queues.
+    if (realtimeCoordinator.enabled) await realtimeCoordinator.removeQueuedSocket(socket.id);
+    else for (const queue of Object.values(waitingQueues)) if (queue.some(p => p.socketId === socket.id)) return;
 
-    if (!waitingQueues[topicId]) waitingQueues[topicId] = [];
+    if (!realtimeCoordinator.enabled && !waitingQueues[topicId]) waitingQueues[topicId] = [];
 
     const newPlayer = {
       socketId: socket.id,
@@ -1474,24 +1548,19 @@ io.on('connection', (socket) => {
       isSyntheticSwarmBot: !!socket.isSyntheticSwarmBot
     };
 
-    // 🎯 Matchmaking Logic: Find compatible opponent
-    let opponentIndex = -1;
-    for (let i = 0; i < waitingQueues[topicId].length; i++) {
-      const waitPlayer = waitingQueues[topicId][i];
-
-      // Compatibility Check
-      const canMatch =
-        (newPlayer.preferredRole === 'Random' || waitPlayer.preferredRole === 'Random') ||
-        (newPlayer.preferredRole !== waitPlayer.preferredRole);
-
-      if (canMatch) {
-        opponentIndex = i;
-        break;
-      }
+    // Redis uses WATCH/MULTI to claim a compatible opponent atomically across
+    // instances. The original queue remains the development fallback.
+    let player1 = null;
+    if (realtimeCoordinator.enabled) {
+      player1 = await realtimeCoordinator.matchmake(topicId, newPlayer);
+    } else {
+      const opponentIndex = waitingQueues[topicId].findIndex(waitPlayer => (
+        newPlayer.preferredRole === 'Random' || waitPlayer.preferredRole === 'Random' || newPlayer.preferredRole !== waitPlayer.preferredRole
+      ));
+      if (opponentIndex !== -1) player1 = waitingQueues[topicId].splice(opponentIndex, 1)[0];
     }
 
-    if (opponentIndex !== -1) {
-      const player1 = waitingQueues[topicId].splice(opponentIndex, 1)[0];
+    if (player1) {
       const player2 = newPlayer;
 
       // Determine Roles
@@ -1577,6 +1646,11 @@ io.on('connection', (socket) => {
           [defender.userId || defender.socketId]: 1
         }
       };
+      await realtimeCoordinator.saveRoom(roomId, activeRooms[roomId]);
+      await Promise.all([
+        realtimeCoordinator.setSocketRoom(critic.socketId, roomId),
+        realtimeCoordinator.setSocketRoom(defender.socketId, roomId),
+      ]);
 
       recordMatchEvent('started');
       refreshRuntimeGauges();
@@ -1601,7 +1675,7 @@ io.on('connection', (socket) => {
         if (s) s.currentMatchId = roomId;
       });
     } else {
-      waitingQueues[topicId].push(newPlayer);
+      if (!realtimeCoordinator.enabled) waitingQueues[topicId].push(newPlayer);
       refreshRuntimeGauges();
       socket.emit('waiting_for_opponent');
       console.log(`[matchmaking] ⏳ ${socket.id} waiting for compatible partner in ${topicId}`);
@@ -1611,9 +1685,16 @@ io.on('connection', (socket) => {
   /**
    * Rejoin match after temporary disconnect (Grace Period)
    */
-  socket.on('rejoin_match', ({ roomId }) => {
+  socket.on('rejoin_match', async ({ roomId }) => {
     const userId = socket.verifiedUserId;
-    const room = activeRooms[roomId];
+    let room = activeRooms[roomId];
+    if (!room && realtimeCoordinator.enabled) {
+      room = await realtimeCoordinator.loadRoom(roomId);
+      if (room) {
+        activeRooms[roomId] = room;
+        startRoomTimer(roomId).catch(error => console.warn('[Realtime] Timer recovery failed:', error.message));
+      }
+    }
     if (!room) {
       socket.emit('error', { message: 'Match no longer exists or grace period expired' });
       return;
@@ -1629,6 +1710,8 @@ io.on('connection', (socket) => {
     room.players[role] = socket.id;
     socket.currentMatchId = roomId;
     socket.join(roomId);
+    await realtimeCoordinator.setSocketRoom(socket.id, roomId);
+    await realtimeCoordinator.saveRoom(roomId, room);
 
     if (gracePeriodTimeouts[roomId] && gracePeriodTimeouts[roomId][role]) {
       clearTimeout(gracePeriodTimeouts[roomId][role]);
@@ -1672,8 +1755,12 @@ io.on('connection', (socket) => {
   /**
    * Turn Submission
    */
-  socket.on('submit_turn', ({ roomId, message, tone }) => {
-    const room = activeRooms[roomId];
+  socket.on('submit_turn', async ({ roomId, message, tone }) => {
+    let room = activeRooms[roomId];
+    if (!room && realtimeCoordinator.enabled) {
+      room = await realtimeCoordinator.loadRoom(roomId);
+      if (room) activeRooms[roomId] = room;
+    }
     if (!room || room.status !== 'active') {
       socket.emit('error', { message: 'Invalid room or match not active' });
       return;
@@ -1730,6 +1817,7 @@ io.on('connection', (socket) => {
 
     // Swap active speaker (chess clock - timers are never reset)
     room.activeSpeaker = room.activeSpeaker === 'Critic' ? 'Defender' : 'Critic';
+    await realtimeCoordinator.saveRoom(roomId, room);
 
     io.to(roomId).emit('cognitive_insight', cognitiveInsight);
 
@@ -1762,7 +1850,11 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const room = activeRooms[roomId];
+    let room = activeRooms[roomId];
+    if (!room && realtimeCoordinator.enabled) {
+      room = await realtimeCoordinator.loadRoom(roomId);
+      if (room) activeRooms[roomId] = room;
+    }
     if (!room || room.status !== 'active') return;
 
     // Determine the caller's ID and role
@@ -1805,6 +1897,7 @@ io.on('connection', (socket) => {
 
     // Consume the lifeline
     room.lifelines[callerId] -= 1;
+    await realtimeCoordinator.saveRoom(roomId, room);
 
     // Tell the room an objection is processing
     io.to(roomId).emit('ai_intervention_processing', { caller: playerRole, targetMessageId });
@@ -1859,7 +1952,12 @@ io.on('connection', (socket) => {
   /**
    * Leave queue (cancel matchmaking)
    */
-  socket.on('leave_queue', () => {
+  socket.on('leave_queue', async () => {
+    if (realtimeCoordinator.enabled) {
+      const removed = await realtimeCoordinator.removeQueuedSocket(socket.id);
+      if (removed) socket.emit('queue_left');
+      return;
+    }
     let removedFromQueue = false;
     for (const [topicId, queue] of Object.entries(waitingQueues)) {
       const index = queue.findIndex(p => p.socketId === socket.id);
@@ -2328,6 +2426,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"category": "Catego
           [defenderUserId]: 1
         }
       };
+      await realtimeCoordinator.saveRoom(roomId, activeRooms[roomId]);
 
       recordMatchEvent('started');
       refreshRuntimeGauges();
@@ -2529,12 +2628,8 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
    * Helper: Emit to all sockets belonging to a specific user
    */
   function emitToUser(targetUserId, event, data) {
-    const socketIds = getUserSocketIds(targetUserId);
-    if (socketIds.length > 0) {
-      socketIds.forEach((sid) => io.to(sid).emit(event, data));
-      return true; // User is online
-    }
-    return false; // User is offline
+    io.to(`user:${targetUserId}`).emit(event, data);
+    return getUserSocketIds(targetUserId).length > 0;
   }
 
   /**
@@ -3046,12 +3141,14 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     // Remove user from socket map
     if (socket.verifiedUserId) {
       removeUserSocket(socket.verifiedUserId, socket.id);
+      await realtimeCoordinator.removePresence(socket.verifiedUserId, socket.id).catch(() => {});
       console.log(`[userSocketMap] Unregistered ${socket.id} for user ${socket.verifiedUserId}`);
     }
 
     // Remove from any topic waiting queue
+    if (realtimeCoordinator.enabled) await realtimeCoordinator.removeQueuedSocket(socket.id).catch(() => {});
     let removedFromQueue = false;
-    for (const [topicId, queue] of Object.entries(waitingQueues)) {
+    for (const [topicId, queue] of Object.entries(realtimeCoordinator.enabled ? {} : waitingQueues)) {
       const index = queue.findIndex(p => p.socketId === socket.id);
       if (index > -1) {
         queue.splice(index, 1);
@@ -3063,7 +3160,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
 
     // 🛡️ Handle active room disconnection with 30s grace period
     // Try both the tagged property and a fallback scan
-    let matchId = socket.currentMatchId;
+    let matchId = socket.currentMatchId || await realtimeCoordinator.getSocketRoom(socket.id).catch(() => null);
     if (!matchId) {
       for (const [rid, room] of Object.entries(activeRooms)) {
         if (room.players.critic === socket.id || room.players.defender === socket.id) {
@@ -3074,7 +3171,11 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     }
 
     if (matchId) {
-      const room = activeRooms[matchId];
+      let room = activeRooms[matchId];
+      if (!room && realtimeCoordinator.enabled) {
+        room = await realtimeCoordinator.loadRoom(matchId).catch(() => null);
+        if (room) activeRooms[matchId] = room;
+      }
       if (room && room.status === 'active') {
         const role = room.players.critic === socket.id ? 'critic' : 'defender';
         const userId = role === 'critic' ? room.critic_id : room.defender_id;
@@ -3098,6 +3199,7 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
         }, 30000);
       }
     }
+    await realtimeCoordinator.clearSocketRoom(socket.id).catch(() => {});
   });
 });
 

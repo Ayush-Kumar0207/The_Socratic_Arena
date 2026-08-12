@@ -19,6 +19,14 @@ const api = axios.create({
 // Arena OS endpoints are authenticated by the same Supabase session used by
 // realtime matches. Resolving the token per request also handles refreshes.
 api.interceptors.request.use(async (config) => {
+  if (import.meta.env.VITE_E2E_TEST_AUTH === "true") {
+    const id =
+      new URLSearchParams(window.location.search).get("e2eUser") ||
+      sessionStorage.getItem("socratic-e2e-user") ||
+      "e2e-user";
+    config.headers.Authorization = `Bearer e2e:${id}`;
+    return config;
+  }
   const { data } = await supabase.auth.getSession();
   const token = data?.session?.access_token;
   if (token) config.headers.Authorization = `Bearer ${token}`;

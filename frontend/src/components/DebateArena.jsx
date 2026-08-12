@@ -1,21 +1,50 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
-import { Shield, Swords, Search, MessageCircle, Loader2, Clock, Gavel, Scale, NotebookPen, ArrowRight, Target, Brain, AlertTriangle, GitBranch, Activity } from 'lucide-react';
-import useVoiceRecognition, { analyzeTextTone } from '../hooks/useVoiceRecognition';
-import VoiceOrb from './VoiceOrb';
-import { generateStances } from '../utils/stanceUtils';
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
+import {
+  Shield,
+  Swords,
+  Search,
+  MessageCircle,
+  Loader2,
+  Clock,
+  Gavel,
+  Scale,
+  NotebookPen,
+  ArrowRight,
+  Target,
+  Brain,
+  AlertTriangle,
+  GitBranch,
+  Activity,
+} from "lucide-react";
+import useVoiceRecognition, {
+  analyzeTextTone,
+} from "../hooks/useVoiceRecognition";
+import VoiceOrb from "./VoiceOrb";
+import { generateStances } from "../utils/stanceUtils";
 
 /**
  * TypewriterMessage
  * Streams text character-by-character for a live feel.
  */
-const TypewriterMessage = ({ text, scrollToBottom, isAutoScrollEnabled, isLastMessage }) => {
-  const [displayedText, setDisplayedText] = useState('');
+const TypewriterMessage = ({
+  text,
+  scrollToBottom,
+  isAutoScrollEnabled,
+  isLastMessage,
+}) => {
+  const [displayedText, setDisplayedText] = useState("");
 
   useEffect(() => {
-    if (!text) { setDisplayedText(''); return; }
-    if (!isLastMessage) { setDisplayedText(text); return; }
+    if (!text) {
+      setDisplayedText("");
+      return;
+    }
+    if (!isLastMessage) {
+      setDisplayedText(text);
+      return;
+    }
     let i = 0;
     const interval = setInterval(() => {
       setDisplayedText(text.substring(0, i));
@@ -26,7 +55,8 @@ const TypewriterMessage = ({ text, scrollToBottom, isAutoScrollEnabled, isLastMe
   }, [text, isLastMessage]);
 
   useEffect(() => {
-    if (displayedText && scrollToBottom && isAutoScrollEnabled) scrollToBottom();
+    if (displayedText && scrollToBottom && isAutoScrollEnabled)
+      scrollToBottom();
   }, [displayedText, scrollToBottom, isAutoScrollEnabled]);
 
   return <div className="whitespace-pre-wrap">{displayedText}</div>;
@@ -40,17 +70,22 @@ const mergeCognitiveInsights = (current = [], incoming = []) => {
   [...current, ...incoming].filter(Boolean).forEach((insight) => {
     map.set(insight.id || insight.messageId, insight);
   });
-  return Array.from(map.values()).sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0),
+  );
 };
 
 const riskTone = (severity) => {
-  if (severity === 'high') return 'border-rose-500/40 bg-rose-950/30 text-rose-100';
-  if (severity === 'medium') return 'border-amber-500/40 bg-amber-950/25 text-amber-100';
-  return 'border-cyan-500/30 bg-cyan-950/20 text-cyan-100';
+  if (severity === "high")
+    return "border-rose-500/40 bg-rose-950/30 text-rose-100";
+  if (severity === "medium")
+    return "border-amber-500/40 bg-amber-950/25 text-amber-100";
+  return "border-cyan-500/30 bg-cyan-950/20 text-cyan-100";
 };
 
-const riskLabel = (score = 0) => `${Math.round(Math.max(0, Math.min(1, score)) * 100)}%`;
-const ENABLE_AI_OBJECTION = false;
+const riskLabel = (score = 0) =>
+  `${Math.round(Math.max(0, Math.min(1, score)) * 100)}%`;
+const ENABLE_AI_OBJECTION = true;
 
 /**
  * DebateArena
@@ -60,28 +95,34 @@ const DebateArena = ({ socket = null, user = null }) => {
   const navigate = useNavigate();
   const { matchId } = useParams();
   const { state } = useLocation();
-  const { topic: initialTopic, isSpectator, stances: initialStances } = state || {};
+  const {
+    topic: initialTopic,
+    isSpectator,
+    stances: initialStances,
+  } = state || {};
 
   const chatContainerRef = useRef(null);
   const textareaRef = useRef(null);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [isMatchOver, setIsMatchOver] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [pauseMessage, setPauseMessage] = useState('');
+  const [pauseMessage, setPauseMessage] = useState("");
   const [pauseCountdown, setPauseCountdown] = useState(30);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [loadingMsg, setLoadingMsg] = useState('Initializing Arena...');
+  const [loadingMsg, setLoadingMsg] = useState("Initializing Arena...");
   const [errorMsg, setErrorMsg] = useState(null);
 
   // Server-authoritative multiplayer state
   const [criticTime, setCriticTime] = useState(300);
   const [defenderTime, setDefenderTime] = useState(300);
-  const [activeSpeaker, setActiveSpeaker] = useState('Critic');
+  const [activeSpeaker, setActiveSpeaker] = useState("Critic");
   const [playerRole, setPlayerRole] = useState(null);
-  const [matchStatus, setMatchStatus] = useState(isSpectator ? 'active' : 'searching');
+  const [matchStatus, setMatchStatus] = useState(
+    isSpectator ? "active" : "searching",
+  );
   const [roomId, setRoomId] = useState(matchId || null);
-  const [topic, setTopic] = useState(initialTopic || '');
-  
+  const [topic, setTopic] = useState(initialTopic || "");
+
   // Timer sync timestamp to prevent flickering from out-of-order events
   const lastTimeSyncRef = useRef(0);
 
@@ -94,31 +135,43 @@ const DebateArena = ({ socket = null, user = null }) => {
 
   const [localTranscript, setLocalTranscript] = useState([]);
   const [cognitiveInsights, setCognitiveInsights] = useState([]);
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState("");
 
   // Voice of Reason: Scratchpad state (for off-turn voice drafts)
-  const [scratchpadText, setScratchpadText] = useState('');
+  const [scratchpadText, setScratchpadText] = useState("");
   const [showScratchpadPrompt, setShowScratchpadPrompt] = useState(false);
 
   // Phase 3: AI Judge Lifeline state
   const [hasUsedLifeline, setHasUsedLifeline] = useState(false);
   const [objectionLoadingId, setObjectionLoadingId] = useState(null);
   const [interventions, setInterventions] = useState({});
-  const handleSummonAIJudge = useCallback((messageId) => {
-    if (hasUsedLifeline || playerRole === 'Spectator') return;
-    setObjectionLoadingId(messageId);
-    socket.emit('summon_ai_judge', { roomId, targetMessageId: messageId });
-  }, [hasUsedLifeline, playerRole, roomId, socket]);
+  const handleSummonAIJudge = useCallback(
+    (messageId) => {
+      if (hasUsedLifeline || playerRole === "Spectator") return;
+      setObjectionLoadingId(messageId);
+      socket.emit("summon_ai_judge", { roomId, targetMessageId: messageId });
+    },
+    [hasUsedLifeline, playerRole, roomId, socket],
+  );
 
   // ── THE VOICE OF REASON ──
-  const isMyTurn = !!(playerRole && activeSpeaker && playerRole.toLowerCase() === activeSpeaker.toLowerCase() && matchStatus === 'active');
+  const isMyTurn = !!(
+    playerRole &&
+    activeSpeaker &&
+    playerRole.toLowerCase() === activeSpeaker.toLowerCase() &&
+    matchStatus === "active"
+  );
   const isMyTurnRef = useRef(isMyTurn);
-  useEffect(() => { isMyTurnRef.current = isMyTurn; }, [isMyTurn]);
+  useEffect(() => {
+    isMyTurnRef.current = isMyTurn;
+  }, [isMyTurn]);
 
   // Refs to always access latest functions (prevents stale closure in voice callbacks)
   const handleSendMessageRef = useRef(null);
   const localTranscriptRef = useRef(localTranscript);
-  useEffect(() => { localTranscriptRef.current = localTranscript; }, [localTranscript]);
+  useEffect(() => {
+    localTranscriptRef.current = localTranscript;
+  }, [localTranscript]);
 
   const cognitiveByMessageId = useMemo(() => {
     const map = {};
@@ -128,12 +181,24 @@ const DebateArena = ({ socket = null, user = null }) => {
     return map;
   }, [cognitiveInsights]);
 
-  const latestCognitiveInsights = useMemo(() => cognitiveInsights.slice(-4).reverse(), [cognitiveInsights]);
+  const latestCognitiveInsights = useMemo(
+    () => cognitiveInsights.slice(-4).reverse(),
+    [cognitiveInsights],
+  );
   const cognitiveSummary = useMemo(() => {
-    if (!cognitiveInsights.length) return { high: 0, medium: 0, averageRisk: 0 };
-    const high = cognitiveInsights.filter((insight) => insight.severity === 'high').length;
-    const medium = cognitiveInsights.filter((insight) => insight.severity === 'medium').length;
-    const averageRisk = cognitiveInsights.reduce((sum, insight) => sum + (insight.riskScore || 0), 0) / cognitiveInsights.length;
+    if (!cognitiveInsights.length)
+      return { high: 0, medium: 0, averageRisk: 0 };
+    const high = cognitiveInsights.filter(
+      (insight) => insight.severity === "high",
+    ).length;
+    const medium = cognitiveInsights.filter(
+      (insight) => insight.severity === "medium",
+    ).length;
+    const averageRisk =
+      cognitiveInsights.reduce(
+        (sum, insight) => sum + (insight.riskScore || 0),
+        0,
+      ) / cognitiveInsights.length;
     return { high, medium, averageRisk };
   }, [cognitiveInsights]);
 
@@ -149,16 +214,19 @@ const DebateArena = ({ socket = null, user = null }) => {
 
   const handleVoiceClear = useCallback(() => {
     if (isMyTurnRef.current) {
-      setInputText('');
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      setInputText("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
     } else {
-      setScratchpadText('');
+      setScratchpadText("");
     }
   }, []);
 
   const handleVoiceObjection = useCallback(() => {
-    if (!ENABLE_AI_OBJECTION || hasUsedLifeline || playerRole === 'Spectator') return;
-    const opponentMessages = localTranscriptRef.current.filter(m => m.speaker !== playerRole);
+    if (!ENABLE_AI_OBJECTION || hasUsedLifeline || playerRole === "Spectator")
+      return;
+    const opponentMessages = localTranscriptRef.current.filter(
+      (m) => m.speaker !== playerRole,
+    );
     if (opponentMessages.length > 0) {
       const lastOpponentMsg = opponentMessages[opponentMessages.length - 1];
       if (lastOpponentMsg?.id) {
@@ -170,15 +238,15 @@ const DebateArena = ({ socket = null, user = null }) => {
   // SAFETY NET #3: Functional state updates to prevent stale closures
   const handleTranscriptChunk = useCallback(({ text }) => {
     if (isMyTurnRef.current) {
-      setInputText(prev => prev ? prev + ' ' + text : text);
+      setInputText((prev) => (prev ? prev + " " + text : text));
     } else {
-      setScratchpadText(prev => prev ? prev + ' ' + text : text);
+      setScratchpadText((prev) => (prev ? prev + " " + text : text));
     }
-    // We don't store tone per-chunk in state yet, but analyzeTextTone 
+    // We don't store tone per-chunk in state yet, but analyzeTextTone
     // will re-evaluate the full buffer on send for perfect context.
   }, []);
 
-  const voiceEnabled = playerRole !== 'Spectator' && matchStatus === 'active';
+  const voiceEnabled = playerRole !== "Spectator" && matchStatus === "active";
 
   const {
     isListening,
@@ -206,13 +274,15 @@ const DebateArena = ({ socket = null, user = null }) => {
 
   // Paste scratchpad into main input
   const useScratchpad = useCallback(() => {
-    setInputText(prev => prev ? prev + ' ' + scratchpadText.trim() : scratchpadText.trim());
-    setScratchpadText('');
+    setInputText((prev) =>
+      prev ? prev + " " + scratchpadText.trim() : scratchpadText.trim(),
+    );
+    setScratchpadText("");
     setShowScratchpadPrompt(false);
   }, [scratchpadText]);
 
   const dismissScratchpad = useCallback(() => {
-    setScratchpadText('');
+    setScratchpadText("");
     setShowScratchpadPrompt(false);
   }, []);
 
@@ -224,16 +294,21 @@ const DebateArena = ({ socket = null, user = null }) => {
       }
 
       // UUID Format Validation
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(matchId)) {
-        setErrorMsg("🔴 Arena Error: Invalid Match ID format. Redirecting to Explore...");
-        setTimeout(() => navigate('/explore'), 3000);
+        setErrorMsg(
+          "🔴 Arena Error: Invalid Match ID format. Redirecting to Explore...",
+        );
+        setTimeout(() => navigate("/explore"), 3000);
         return;
       }
 
       // CRITICAL: Wait for the user object to exist before calculating roles!
       if (!user && !user?.id) {
-        const cachedId = localStorage.getItem('socratic_user_id') || localStorage.getItem('supabase.auth.token');
+        const cachedId =
+          localStorage.getItem("socratic_user_id") ||
+          localStorage.getItem("supabase.auth.token");
         if (!cachedId) {
           setLoadingMsg("Waiting for authentication...");
           return;
@@ -243,32 +318,34 @@ const DebateArena = ({ socket = null, user = null }) => {
       try {
         setLoadingMsg("Securely initializing battle connection...");
         const { data: match, error } = await supabase
-          .from('matches')
-          .select('*')
-          .eq('id', matchId)
+          .from("matches")
+          .select("*")
+          .eq("id", matchId)
           .maybeSingle(); // Use maybeSingle to avoid throw on missing record
 
         if (error) throw error;
 
-        if (match?.status === 'abandoned') {
-          setErrorMsg('🔴 Arena Error: This match was abandoned due to disconnection. Redirecting to Explore...');
-          setTimeout(() => navigate('/explore'), 3000);
+        if (match?.status === "abandoned") {
+          setErrorMsg(
+            "🔴 Arena Error: This match was abandoned due to disconnection. Redirecting to Explore...",
+          );
+          setTimeout(() => navigate("/explore"), 3000);
           return;
         }
 
         if (match) {
           setTopic(match.topic_title || match.topic);
-          if (match.status !== 'abandoned') {
-            setMatchStatus('active');
+          if (match.status !== "abandoned") {
+            setMatchStatus("active");
           }
 
           // Deterministic Role Assignment
           if (user?.id === match.critic_id) {
-            setPlayerRole('Critic');
+            setPlayerRole("Critic");
           } else if (user?.id === match.defender_id) {
-            setPlayerRole('Defender');
+            setPlayerRole("Defender");
           } else {
-            setPlayerRole('Spectator');
+            setPlayerRole("Spectator");
           }
           setIsInitializing(false);
         } else {
@@ -280,7 +357,10 @@ const DebateArena = ({ socket = null, user = null }) => {
           // We don't setIsInitializing(false) yet; socket will trigger it via setMatchStatus('active')
         }
       } catch (err) {
-        console.warn("Arena DB Fetch Warning (might be a transient match):", err);
+        console.warn(
+          "Arena DB Fetch Warning (might be a transient match):",
+          err,
+        );
         // Don't set errorMsg yet, let socket attempt to hydrate
         if (initialTopic) setTopic(initialTopic);
         setLoadingMsg("Synchronizing live stream with server...");
@@ -293,7 +373,10 @@ const DebateArena = ({ socket = null, user = null }) => {
   const scrollToBottomSafe = () => {
     if (chatContainerRef.current) {
       const { scrollHeight } = chatContainerRef.current;
-      chatContainerRef.current.scrollTo({ top: scrollHeight, behavior: 'smooth' });
+      chatContainerRef.current.scrollTo({
+        top: scrollHeight,
+        behavior: "smooth",
+      });
     }
   };
 
@@ -304,7 +387,7 @@ const DebateArena = ({ socket = null, user = null }) => {
 
   useEffect(() => {
     if (socket && isSpectator && roomId) {
-      socket.emit('join_as_spectator', roomId);
+      socket.emit("join_as_spectator", roomId);
     }
   }, [socket, isSpectator, roomId]);
 
@@ -314,67 +397,89 @@ const DebateArena = ({ socket = null, user = null }) => {
 
     const handleMatchFound = (data) => {
       // CRITICAL FIX: Determine role by user ID first (reliable), socket ID fallback (transient)
-      let role = 'Unknown';
+      let role = "Unknown";
       if (user?.id) {
         if (data.criticUserId === user.id) {
-          role = 'Critic';
+          role = "Critic";
         } else if (data.defenderUserId === user.id) {
-          role = 'Defender';
+          role = "Defender";
         }
       }
       // Fallback to socket-based role detection for transient matches
-      if (role === 'Unknown' && data.roles) {
-        role = data.roles[socket.id] || 'Spectator';
+      if (role === "Unknown" && data.roles) {
+        role = data.roles[socket.id] || "Spectator";
       }
-      
+
       setRoomId(data.roomId);
       setPlayerRole(role);
-      setMatchStatus('active');
+      setMatchStatus("active");
       setLocalTranscript(data.transcript || []);
-      setCognitiveInsights(data.cognitiveInsights || extractCognitiveInsights(data.transcript || []));
-      setActiveSpeaker(data.activeSpeaker || 'Critic');
-      setTopic(data.topic || '');
+      setCognitiveInsights(
+        data.cognitiveInsights ||
+          extractCognitiveInsights(data.transcript || []),
+      );
+      setActiveSpeaker(data.activeSpeaker || "Critic");
+      setTopic(data.topic || "");
       setIsInitializing(false); // Unlock UI for transient rooms
       // Reset timer sync on match found
       lastTimeSyncRef.current = 0;
     };
 
-    const handleTimeSync = ({ criticTime: ct, defenderTime: dt, activeSpeaker: as, timestamp }) => {
+    const handleTimeSync = ({
+      criticTime: ct,
+      defenderTime: dt,
+      activeSpeaker: as,
+      timestamp,
+    }) => {
       // Prevent flickering from out-of-order or duplicate time_sync events
       const ts = timestamp || Date.now();
       if (ts < lastTimeSyncRef.current) {
         return; // Ignore stale time_sync
       }
       lastTimeSyncRef.current = ts;
-      
+
       setCriticTime(ct);
       setDefenderTime(dt);
       setActiveSpeaker(as);
     };
 
-    const handleNewTurn = ({ transcript: t, activeSpeaker: as, cognitiveInsight }) => {
+    const handleNewTurn = ({
+      transcript: t,
+      activeSpeaker: as,
+      cognitiveInsight,
+    }) => {
       setIsAutoScrollEnabled(true); // Force auto-scroll on new message
       setLocalTranscript(t);
-      setCognitiveInsights(prev => mergeCognitiveInsights(prev, [...extractCognitiveInsights(t), cognitiveInsight].filter(Boolean)));
+      setCognitiveInsights((prev) =>
+        mergeCognitiveInsights(
+          prev,
+          [...extractCognitiveInsights(t), cognitiveInsight].filter(Boolean),
+        ),
+      );
       setActiveSpeaker(as);
     };
 
     const handleMatchOver = ({ finalState }) => {
-      setMatchStatus('finished');
+      setMatchStatus("finished");
       setLocalTranscript(finalState.transcript);
-      setCognitiveInsights(extractCognitiveInsights(finalState.transcript || []));
+      setCognitiveInsights(
+        extractCognitiveInsights(finalState.transcript || []),
+      );
       setCriticTime(finalState.criticTime);
       setDefenderTime(finalState.defenderTime);
 
       setIsMatchOver(true);
       setTimeout(() => {
-        navigate('/review/' + roomId);
+        navigate("/review/" + roomId);
       }, 4000);
     };
 
     const handleSpectatorSync = (data) => {
       setLocalTranscript(data.transcript || []);
-      setCognitiveInsights(data.cognitiveInsights || extractCognitiveInsights(data.transcript || []));
+      setCognitiveInsights(
+        data.cognitiveInsights ||
+          extractCognitiveInsights(data.transcript || []),
+      );
       setCriticTime(data.criticTime);
       setDefenderTime(data.defenderTime);
       setActiveSpeaker(data.activeSpeaker);
@@ -383,15 +488,16 @@ const DebateArena = ({ socket = null, user = null }) => {
 
     const handleOpponentDisconnected = (data) => {
       // Handle both string (legacy) and object (new) formats
-      const disconnectInfo = typeof data === 'string' ? { message: data, type: 'legacy' } : data;
+      const disconnectInfo =
+        typeof data === "string" ? { message: data, type: "legacy" } : data;
 
-      setMatchStatus('abandoned');
+      setMatchStatus("abandoned");
       setIsPaused(false);
 
       // Determine specific error message based on who disconnected
-      let errorMessage = '';
-      if (disconnectInfo.type === 'abandoned') {
-        if (playerRole === 'Spectator') {
+      let errorMessage = "";
+      if (disconnectInfo.type === "abandoned") {
+        if (playerRole === "Spectator") {
           errorMessage = `👁️ Arena Error: ${disconnectInfo.leaverRole} disconnected. Match abandoned.`;
         } else if (disconnectInfo.leaverRole === playerRole) {
           errorMessage = `🔴 Arena Error: You disconnected. Match abandoned.`;
@@ -400,14 +506,16 @@ const DebateArena = ({ socket = null, user = null }) => {
         }
       } else {
         // Legacy fallback
-        errorMessage = '🔴 Arena Error: ' + (disconnectInfo.message || 'Match disconnected unexpectedly.');
+        errorMessage =
+          "🔴 Arena Error: " +
+          (disconnectInfo.message || "Match disconnected unexpectedly.");
       }
 
       setErrorMsg(errorMessage);
 
       // Redirect after delay
       const redirectDelay = disconnectInfo.redirectDelay || 3000;
-      setTimeout(() => navigate('/explore'), redirectDelay);
+      setTimeout(() => navigate("/explore"), redirectDelay);
     };
 
     const handleOpponentPaused = ({ message }) => {
@@ -418,38 +526,43 @@ const DebateArena = ({ socket = null, user = null }) => {
 
     const handleMatchResumed = () => {
       setIsPaused(false);
-      setPauseMessage('');
+      setPauseMessage("");
     };
 
     const handleSelfDisconnect = () => {
       setIsPaused(true);
-      setPauseMessage('You lost connection. Attempting to rejoin...');
+      setPauseMessage("You lost connection. Attempting to rejoin...");
       setPauseCountdown(30);
 
-      // Fix: DO NOT set errorMsg here. Let the graceful isPaused UI handle it. 
+      // Fix: DO NOT set errorMsg here. Let the graceful isPaused UI handle it.
       // This ensures the user sees the beautiful 30s spinner countdown instead of a fatal error.
     };
 
     const handleSelfReconnect = () => {
       if (user?.id && roomId && !isSpectator) {
-        console.log('[DebateArena] Reconnected! Emitting rejoin_match...');
-        socket.emit('rejoin_match', { roomId, userId: user.id });
+        console.log("[DebateArena] Reconnected! Emitting rejoin_match...");
+        socket.emit("rejoin_match", { roomId, userId: user.id });
       } else if (roomId && isSpectator) {
-        console.log('[DebateArena] Reconnected as spectator! Emitting join_as_spectator...');
-        socket.emit('join_as_spectator', roomId);
+        console.log(
+          "[DebateArena] Reconnected as spectator! Emitting join_as_spectator...",
+        );
+        socket.emit("join_as_spectator", roomId);
       }
     };
 
-    const handleWaitingForOpponent = () => setMatchStatus('searching');
+    const handleWaitingForOpponent = () => setMatchStatus("searching");
 
     const handleSocketError = ({ message }) => {
       setObjectionLoadingId(null); // Reset spinner on any error
       // If rejoining fails because the match is gone, redirect
-      if (message && (message.includes('no longer exists') || message.includes('expired'))) {
-        setErrorMsg('Match session expired or no longer available.');
-        setTimeout(() => navigate('/explore'), 3000);
+      if (
+        message &&
+        (message.includes("no longer exists") || message.includes("expired"))
+      ) {
+        setErrorMsg("Match session expired or no longer available.");
+        setTimeout(() => navigate("/explore"), 3000);
       } else {
-        window.alert(message || 'An error occurred');
+        window.alert(message || "An error occurred");
       }
     };
 
@@ -461,57 +574,59 @@ const DebateArena = ({ socket = null, user = null }) => {
 
     const handleAiResult = (result) => {
       setObjectionLoadingId(null);
-      setInterventions(prev => ({
+      setInterventions((prev) => ({
         ...prev,
-        [result.targetMessageId]: result
+        [result.targetMessageId]: result,
       }));
       setIsAutoScrollEnabled(true);
     };
 
     const handleCognitiveInsight = (insight) => {
-      setCognitiveInsights(prev => mergeCognitiveInsights(prev, [insight]));
+      setCognitiveInsights((prev) => mergeCognitiveInsights(prev, [insight]));
     };
 
-    socket.on('match_found', handleMatchFound);
-    socket.on('time_sync', handleTimeSync);
-    socket.on('new_turn', handleNewTurn);
-    socket.on('match_over', handleMatchOver);
-    socket.on('spectator_sync', handleSpectatorSync);
-    socket.on('opponent_disconnected', handleOpponentDisconnected);
-    socket.on('opponent_paused', handleOpponentPaused);
-    socket.on('match_resumed', handleMatchResumed);
-    socket.on('waiting_for_opponent', handleWaitingForOpponent);
-    socket.on('error', handleSocketError);
-    socket.on('disconnect', handleSelfDisconnect);
-    socket.on('connect', handleSelfReconnect);
-    socket.on('ai_intervention_processing', handleAiProcessing);
-    socket.on('ai_intervention_result', handleAiResult);
-    socket.on('ai_intervention', handleAiResult);
-    socket.on('cognitive_insight', handleCognitiveInsight);
+    socket.on("match_found", handleMatchFound);
+    socket.on("time_sync", handleTimeSync);
+    socket.on("new_turn", handleNewTurn);
+    socket.on("match_over", handleMatchOver);
+    socket.on("spectator_sync", handleSpectatorSync);
+    socket.on("opponent_disconnected", handleOpponentDisconnected);
+    socket.on("opponent_paused", handleOpponentPaused);
+    socket.on("match_resumed", handleMatchResumed);
+    socket.on("waiting_for_opponent", handleWaitingForOpponent);
+    socket.on("error", handleSocketError);
+    socket.on("disconnect", handleSelfDisconnect);
+    socket.on("connect", handleSelfReconnect);
+    socket.on("ai_intervention_processing", handleAiProcessing);
+    socket.on("ai_intervention_result", handleAiResult);
+    socket.on("ai_intervention", handleAiResult);
+    socket.on("cognitive_insight", handleCognitiveInsight);
 
     // 🚀 PROACTIVE REJOIN: If we mount and socket is already connected, rejoin immediately
     if (socket.connected && user?.id && roomId && !isSpectator) {
-      console.log('[DebateArena] Already connected on mount. Emitting rejoin_match...');
-      socket.emit('rejoin_match', { roomId, userId: user.id });
+      console.log(
+        "[DebateArena] Already connected on mount. Emitting rejoin_match...",
+      );
+      socket.emit("rejoin_match", { roomId, userId: user.id });
     }
 
     return () => {
-      socket.off('match_found', handleMatchFound);
-      socket.off('time_sync', handleTimeSync);
-      socket.off('new_turn', handleNewTurn);
-      socket.off('match_over', handleMatchOver);
-      socket.off('spectator_sync', handleSpectatorSync);
-      socket.off('opponent_disconnected', handleOpponentDisconnected);
-      socket.off('opponent_paused', handleOpponentPaused);
-      socket.off('match_resumed', handleMatchResumed);
-      socket.off('waiting_for_opponent', handleWaitingForOpponent);
-      socket.off('error', handleSocketError);
-      socket.off('disconnect', handleSelfDisconnect);
-      socket.off('connect', handleSelfReconnect);
-      socket.off('ai_intervention_processing', handleAiProcessing);
-      socket.off('ai_intervention_result', handleAiResult);
-      socket.off('ai_intervention', handleAiResult);
-      socket.off('cognitive_insight', handleCognitiveInsight);
+      socket.off("match_found", handleMatchFound);
+      socket.off("time_sync", handleTimeSync);
+      socket.off("new_turn", handleNewTurn);
+      socket.off("match_over", handleMatchOver);
+      socket.off("spectator_sync", handleSpectatorSync);
+      socket.off("opponent_disconnected", handleOpponentDisconnected);
+      socket.off("opponent_paused", handleOpponentPaused);
+      socket.off("match_resumed", handleMatchResumed);
+      socket.off("waiting_for_opponent", handleWaitingForOpponent);
+      socket.off("error", handleSocketError);
+      socket.off("disconnect", handleSelfDisconnect);
+      socket.off("connect", handleSelfReconnect);
+      socket.off("ai_intervention_processing", handleAiProcessing);
+      socket.off("ai_intervention_result", handleAiResult);
+      socket.off("ai_intervention", handleAiResult);
+      socket.off("cognitive_insight", handleCognitiveInsight);
     };
   }, [socket, user, roomId, isSpectator, navigate, playerRole]);
 
@@ -520,7 +635,7 @@ const DebateArena = ({ socket = null, user = null }) => {
     let interval;
     if (isPaused) {
       interval = setInterval(() => {
-        setPauseCountdown(prev => Math.max(0, prev - 1));
+        setPauseCountdown((prev) => Math.max(0, prev - 1));
       }, 1000);
     }
     return () => {
@@ -531,12 +646,17 @@ const DebateArena = ({ socket = null, user = null }) => {
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   };
 
   const handleSendMessage = useCallback(() => {
-    if (!inputText.trim() || matchStatus !== 'active') return;
-    if (!playerRole || !activeSpeaker || playerRole.toLowerCase() !== activeSpeaker.toLowerCase()) return;
+    if (!inputText.trim() || matchStatus !== "active") return;
+    if (
+      !playerRole ||
+      !activeSpeaker ||
+      playerRole.toLowerCase() !== activeSpeaker.toLowerCase()
+    )
+      return;
 
     setIsAutoScrollEnabled(true);
 
@@ -544,14 +664,14 @@ const DebateArena = ({ socket = null, user = null }) => {
     // This ensures typed "!!!" or "Are you sure" gains the same tone as voice.
     const { text, tone } = analyzeTextTone(inputText.trim());
 
-    socket.emit('submit_turn', { 
-      roomId, 
+    socket.emit("submit_turn", {
+      roomId,
       message: text,
-      tone: tone || 'neutral'
+      tone: tone || "neutral",
     });
 
-    setInputText('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    setInputText("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   }, [activeSpeaker, inputText, matchStatus, playerRole, roomId, socket]);
 
   // Keep ref in sync so voice callbacks always call the latest version
@@ -560,7 +680,7 @@ const DebateArena = ({ socket = null, user = null }) => {
   }, [handleSendMessage]);
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
@@ -568,11 +688,12 @@ const DebateArena = ({ socket = null, user = null }) => {
 
   const handleTextareaChange = (e) => {
     setInputText(e.target.value);
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    e.target.style.height = "auto";
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
   };
 
-  const isInputDisabled = matchStatus !== 'active' || playerRole !== activeSpeaker;
+  const isInputDisabled =
+    matchStatus !== "active" || playerRole !== activeSpeaker;
 
   // FAILSAFE 1: Error State
   if (errorMsg) {
@@ -583,7 +704,9 @@ const DebateArena = ({ socket = null, user = null }) => {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-rose-500/20 rounded-full mb-4">
               <span className="text-3xl">⚠️</span>
             </div>
-            <h2 className="text-3xl font-bold text-rose-400 mb-2">Arena Error</h2>
+            <h2 className="text-3xl font-bold text-rose-400 mb-2">
+              Arena Error
+            </h2>
             <p className="text-lg text-rose-300 mb-4">{errorMsg}</p>
             <div className="text-sm text-rose-200/70 animate-pulse">
               Redirecting to Explore page...
@@ -618,24 +741,32 @@ const DebateArena = ({ socket = null, user = null }) => {
                 <Clock className="h-8 w-8 text-cyan-400 animate-pulse" />
               </div>
             </div>
-            <h2 className="text-2xl font-black text-slate-100 uppercase tracking-tighter mb-2">Match Paused</h2>
-            <p className="text-slate-400 mb-6 font-medium">{pauseMessage || 'Network interruption detected...'}</p>
+            <h2 className="text-2xl font-black text-slate-100 uppercase tracking-tighter mb-2">
+              Match Paused
+            </h2>
+            <p className="text-slate-400 mb-6 font-medium">
+              {pauseMessage || "Network interruption detected..."}
+            </p>
             <div className="bg-slate-950/50 rounded-xl px-4 py-3 border border-slate-800">
-              <span className="text-xs text-slate-500 uppercase font-black tracking-widest block mb-1">Abandonment in</span>
-              <span className="text-3xl font-mono font-bold text-cyan-400">{pauseCountdown}s</span>
+              <span className="text-xs text-slate-500 uppercase font-black tracking-widest block mb-1">
+                Abandonment in
+              </span>
+              <span className="text-3xl font-mono font-bold text-cyan-400">
+                {pauseCountdown}s
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {playerRole === 'Spectator' && (
+      {playerRole === "Spectator" && (
         <div className="bg-red-900/40 text-red-200 p-2 text-center text-sm font-semibold border border-red-500/30 rounded-lg mb-4">
           👁️ You are spectating this match live. Read-only mode.
         </div>
       )}
 
       {/* ── SEARCHING / SYNCING STATE ── */}
-      {matchStatus === 'searching' && (
+      {matchStatus === "searching" && (
         <div className="flex flex-col items-center justify-center flex-1 text-slate-400">
           <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-cyan-500 mb-4"></div>
           <p>Syncing match state with server...</p>
@@ -643,23 +774,29 @@ const DebateArena = ({ socket = null, user = null }) => {
       )}
 
       {/* ── ACTIVE / FINISHED ── */}
-      {(matchStatus === 'active' || matchStatus === 'finished') && (
+      {(matchStatus === "active" || matchStatus === "finished") && (
         <div className="flex-1 flex flex-col min-h-0 relative">
           {/* Header */}
           <div className="shrink-0 mb-3 sm:mb-5">
             <div className="flex items-start justify-between gap-3 sm:gap-4">
               <div className="flex-1 min-w-0">
-                <h2 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">Blitz Debate Arena</h2>
+                <h2 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">
+                  Blitz Debate Arena
+                </h2>
                 <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                  Playing as:{' '}
-                  <span className={`font-semibold ${playerRole === 'Critic' ? 'text-rose-300' : 'text-indigo-300'}`}>
+                  Playing as:{" "}
+                  <span
+                    className={`font-semibold ${playerRole === "Critic" ? "text-rose-300" : "text-indigo-300"}`}
+                  >
                     {playerRole}
                   </span>
                 </p>
               </div>
-              {matchStatus === 'finished' && (
-                <button onClick={() => setMatchStatus('idle')}
-                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-cyan-200 hover:border-cyan-400 transition">
+              {matchStatus === "finished" && (
+                <button
+                  onClick={() => setMatchStatus("idle")}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-cyan-950/40 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-cyan-200 hover:border-cyan-400 transition"
+                >
                   <Search className="h-4 w-4" /> New Match
                 </button>
               )}
@@ -667,62 +804,90 @@ const DebateArena = ({ socket = null, user = null }) => {
           </div>
 
           {/* Mission Ribbon - Integrated into layout to prevent overlap */}
-          {playerRole !== 'Spectator' && stances && (
-             <div className="shrink-0 mb-4 animate-[slideDown_0.75s_ease-out]">
-                <div className={`mx-auto max-w-full px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center justify-between gap-3 ${
-                  playerRole === 'Critic' 
-                    ? 'bg-rose-950/30 border-rose-500/20 text-rose-100 shadow-rose-950/50' 
-                    : 'bg-indigo-950/30 border-indigo-500/20 text-indigo-100 shadow-indigo-950/50'
-                }`}>
-                  <div className="flex items-center gap-2.5">
-                    <Target className={`h-4 w-4 shrink-0 transition-transform hover:scale-120 ${playerRole === 'Critic' ? 'text-rose-400' : 'text-indigo-400'}`} />
-                    <p className="text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] opacity-80">
-                      Primary Directive
-                    </p>
-                  </div>
-                  <p className="text-xs sm:text-sm font-bold text-white tracking-wide">
-                    {playerRole === 'Defender' ? stances.stanceA : stances.stanceB}
+          {playerRole !== "Spectator" && stances && (
+            <div className="shrink-0 mb-4 animate-[slideDown_0.75s_ease-out]">
+              <div
+                className={`mx-auto max-w-full px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center justify-between gap-3 ${
+                  playerRole === "Critic"
+                    ? "bg-rose-950/30 border-rose-500/20 text-rose-100 shadow-rose-950/50"
+                    : "bg-indigo-950/30 border-indigo-500/20 text-indigo-100 shadow-indigo-950/50"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Target
+                    className={`h-4 w-4 shrink-0 transition-transform hover:scale-120 ${playerRole === "Critic" ? "text-rose-400" : "text-indigo-400"}`}
+                  />
+                  <p className="text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] opacity-80">
+                    Primary Directive
                   </p>
-                  <div className={`h-2 w-2 rounded-full animate-pulse ${playerRole === 'Critic' ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e]' : 'bg-indigo-500 shadow-[0_0_8px_#6366f1]'}`} />
                 </div>
+                <p className="text-xs sm:text-sm font-bold text-white tracking-wide">
+                  {playerRole === "Defender"
+                    ? stances.stanceA
+                    : stances.stanceB}
+                </p>
+                <div
+                  className={`h-2 w-2 rounded-full animate-pulse ${playerRole === "Critic" ? "bg-rose-500 shadow-[0_0_8px_#f43f5e]" : "bg-indigo-500 shadow-[0_0_8px_#6366f1]"}`}
+                />
+              </div>
 
-                {/* Sub-label for Topic under the ribbon */}
-                {topic && (
-                  <p className="mt-2 text-[10px] sm:text-[11px] text-cyan-400/80 font-bold uppercase tracking-[0.1em] flex items-center gap-1.5 px-2">
-                    <MessageCircle className="h-3 w-3" /> {topic}
-                  </p>
-                )}
-             </div>
+              {/* Sub-label for Topic under the ribbon */}
+              {topic && (
+                <p className="mt-2 text-[10px] sm:text-[11px] text-cyan-400/80 font-bold uppercase tracking-[0.1em] flex items-center gap-1.5 px-2">
+                  <MessageCircle className="h-3 w-3" /> {topic}
+                </p>
+              )}
+            </div>
           )}
 
           {/* Timers */}
           <div className="shrink-0 grid grid-cols-2 gap-2 sm:gap-4 mb-3 sm:mb-5">
-            <div className={`rounded-xl border-2 p-2 sm:p-4 transition-all duration-300 ${activeSpeaker === 'Critic'
-                ? 'border-rose-500/60 bg-rose-950/30 shadow-lg shadow-rose-500/20'
-                : 'border-slate-700/50 bg-slate-800/40'}`}>
+            <div
+              className={`rounded-xl border-2 p-2 sm:p-4 transition-all duration-300 ${
+                activeSpeaker === "Critic"
+                  ? "border-rose-500/60 bg-rose-950/30 shadow-lg shadow-rose-500/20"
+                  : "border-slate-700/50 bg-slate-800/40"
+              }`}
+            >
               <div className="flex items-center justify-between mb-1 sm:mb-2">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <Swords className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-rose-300" />
-                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-rose-300">Critic</span>
+                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-rose-300">
+                    Critic
+                  </span>
                 </div>
-                {activeSpeaker === 'Critic' && <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-rose-400 animate-pulse" />}
+                {activeSpeaker === "Critic" && (
+                  <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-rose-400 animate-pulse" />
+                )}
               </div>
-              <div className={`text-xl sm:text-4xl font-mono font-bold ${criticTime <= 15 ? 'animate-pulse text-rose-500' : criticTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
+              <div
+                className={`text-xl sm:text-4xl font-mono font-bold ${criticTime <= 15 ? "animate-pulse text-rose-500" : criticTime <= 60 ? "text-amber-400" : "text-slate-100"}`}
+              >
                 {formatTime(criticTime)}
               </div>
             </div>
 
-            <div className={`rounded-xl border-2 p-2 sm:p-4 transition-all duration-300 ${activeSpeaker === 'Defender'
-                ? 'border-indigo-500/60 bg-indigo-950/30 shadow-lg shadow-indigo-500/20'
-                : 'border-slate-700/50 bg-slate-800/40'}`}>
+            <div
+              className={`rounded-xl border-2 p-2 sm:p-4 transition-all duration-300 ${
+                activeSpeaker === "Defender"
+                  ? "border-indigo-500/60 bg-indigo-950/30 shadow-lg shadow-indigo-500/20"
+                  : "border-slate-700/50 bg-slate-800/40"
+              }`}
+            >
               <div className="flex items-center justify-between mb-1 sm:mb-2">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-300" />
-                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-indigo-300">Defender</span>
+                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-indigo-300">
+                    Defender
+                  </span>
                 </div>
-                {activeSpeaker === 'Defender' && <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-indigo-400 animate-pulse" />}
+                {activeSpeaker === "Defender" && (
+                  <div className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-indigo-400 animate-pulse" />
+                )}
               </div>
-              <div className={`text-xl sm:text-4xl font-mono font-bold ${defenderTime <= 15 ? 'animate-pulse text-rose-500' : defenderTime <= 60 ? 'text-amber-400' : 'text-slate-100'}`}>
+              <div
+                className={`text-xl sm:text-4xl font-mono font-bold ${defenderTime <= 15 ? "animate-pulse text-rose-500" : defenderTime <= 60 ? "text-amber-400" : "text-slate-100"}`}
+              >
                 {formatTime(defenderTime)}
               </div>
             </div>
@@ -733,13 +898,21 @@ const DebateArena = ({ socket = null, user = null }) => {
               <div className="flex items-center justify-between gap-3 mb-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Brain className="h-4 w-4 text-cyan-300 shrink-0" />
-                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.18em] text-slate-300 truncate">Cognitive Graph</span>
+                  <span className="text-[10px] sm:text-xs font-black uppercase tracking-[0.18em] text-slate-300 truncate">
+                    Cognitive Graph
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] sm:text-xs font-bold text-slate-400 shrink-0">
                   <Activity className="h-3.5 w-3.5 text-emerald-300" />
-                  <span>Avg risk {riskLabel(cognitiveSummary.averageRisk)}</span>
-                  {(cognitiveSummary.high > 0 || cognitiveSummary.medium > 0) && (
-                    <span className="text-amber-300">{cognitiveSummary.high} high / {cognitiveSummary.medium} med</span>
+                  <span>
+                    Avg risk {riskLabel(cognitiveSummary.averageRisk)}
+                  </span>
+                  {(cognitiveSummary.high > 0 ||
+                    cognitiveSummary.medium > 0) && (
+                    <span className="text-amber-300">
+                      {cognitiveSummary.high} high / {cognitiveSummary.medium}{" "}
+                      med
+                    </span>
                   )}
                 </div>
               </div>
@@ -747,10 +920,17 @@ const DebateArena = ({ socket = null, user = null }) => {
                 {latestCognitiveInsights.map((insight) => {
                   const primaryFallacy = insight.fallacies?.[0];
                   return (
-                    <div key={insight.id || insight.messageId} className={`rounded-lg border px-3 py-2 ${riskTone(insight.severity)}`}>
+                    <div
+                      key={insight.id || insight.messageId}
+                      className={`rounded-lg border px-3 py-2 ${riskTone(insight.severity)}`}
+                    >
                       <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest">{insight.speaker}</span>
-                        <span className="text-[10px] font-mono font-bold">{riskLabel(insight.riskScore)}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">
+                          {insight.speaker}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold">
+                          {riskLabel(insight.riskScore)}
+                        </span>
                       </div>
                       <div className="flex items-start gap-2 text-xs leading-snug">
                         {insight.contradiction ? (
@@ -761,7 +941,9 @@ const DebateArena = ({ socket = null, user = null }) => {
                           <Activity className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                         )}
                         <p className="line-clamp-2">
-                          {insight.contradiction?.summary || primaryFallacy?.label || `Logic ${riskLabel(insight.dimensions?.logic)} · Evidence ${riskLabel(insight.dimensions?.evidence)}`}
+                          {insight.contradiction?.summary ||
+                            primaryFallacy?.label ||
+                            `Logic ${riskLabel(insight.dimensions?.logic)} · Evidence ${riskLabel(insight.dimensions?.evidence)}`}
                         </p>
                       </div>
                     </div>
@@ -775,58 +957,94 @@ const DebateArena = ({ socket = null, user = null }) => {
             ref={chatContainerRef}
             onScroll={() => {
               const c = chatContainerRef?.current;
-              if (c) setIsAutoScrollEnabled(c.scrollTop + c.clientHeight >= c.scrollHeight - 50);
+              if (c)
+                setIsAutoScrollEnabled(
+                  c.scrollTop + c.clientHeight >= c.scrollHeight - 50,
+                );
             }}
             className={`flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 pr-2 custom-scrollbar transition-all pt-2 pb-4`}
           >
             {localTranscript?.length === 0 ? (
-              playerRole !== 'Spectator' && (
+              playerRole !== "Spectator" && (
                 <div className="flex flex-1 h-full items-center justify-center text-center flex-col gap-2">
                   <MessageCircle className="h-9 w-9 text-cyan-400 opacity-40" />
-                  <p className="text-sm text-cyan-300">Send your first argument as {playerRole}!</p>
+                  <p className="text-sm text-cyan-300">
+                    Send your first argument as {playerRole}!
+                  </p>
                 </div>
               )
             ) : (
               <>
                 {(localTranscript || []).map((message, index) => {
                   const isMe = message?.speaker === playerRole;
-                  const cognitive = message?.cognitive || cognitiveByMessageId[message?.id];
+                  const cognitive =
+                    message?.cognitive || cognitiveByMessageId[message?.id];
                   const primaryFallacy = cognitive?.fallacies?.[0];
-                  const shouldShowCognitive = cognitive && (cognitive.riskScore >= 0.32 || primaryFallacy || cognitive.contradiction);
+                  const shouldShowCognitive =
+                    cognitive &&
+                    (cognitive.riskScore >= 0.32 ||
+                      primaryFallacy ||
+                      cognitive.contradiction);
                   return (
-                    <div key={message?.id || `${message?.speaker}-${index}`}
-                      className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} mb-2`}>
-                      <div className={`max-w-[85%] sm:max-w-[72%] rounded-2xl px-4 py-3 sm:px-5 sm:py-4 transition-all duration-500 ${isMe
-                          ? 'bg-indigo-600 text-white rounded-br-none shadow-lg'
-                          : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none shadow-md'
-                        } tone-${message?.tone || 'neutral'}`}>
-                        <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 flex items-center justify-between ${message?.speaker === 'Critic' ? 'text-rose-300' : 'text-indigo-300'
-                          }`}>
+                    <div
+                      key={message?.id || `${message?.speaker}-${index}`}
+                      className={`flex w-full ${isMe ? "justify-end" : "justify-start"} mb-2`}
+                    >
+                      <div
+                        className={`max-w-[85%] sm:max-w-[72%] rounded-2xl px-4 py-3 sm:px-5 sm:py-4 transition-all duration-500 ${
+                          isMe
+                            ? "bg-indigo-600 text-white rounded-br-none shadow-lg"
+                            : "bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none shadow-md"
+                        } tone-${message?.tone || "neutral"}`}
+                      >
+                        <p
+                          className={`text-[10px] font-bold uppercase tracking-widest mb-2 flex items-center justify-between ${
+                            message?.speaker === "Critic"
+                              ? "text-rose-300"
+                              : "text-indigo-300"
+                          }`}
+                        >
                           <span>{message?.speaker}</span>
-                          {message?.tone && message.tone !== 'neutral' && (
-                             <span className="text-[9px] opacity-40 italic font-medium ml-2">
-                               [{message.tone}]
-                             </span>
+                          {message?.tone && message.tone !== "neutral" && (
+                            <span className="text-[9px] opacity-40 italic font-medium ml-2">
+                              [{message.tone}]
+                            </span>
                           )}
                         </p>
                         <TypewriterMessage
-                          text={message?.text ?? ''}
+                          text={message?.text ?? ""}
                           isAutoScrollEnabled={isAutoScrollEnabled}
                           isLastMessage={index === localTranscript?.length - 1}
                           scrollToBottom={scrollToBottomSafe}
                         />
 
                         {shouldShowCognitive && (
-                          <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${riskTone(cognitive.severity)}`}>
+                          <div
+                            className={`mt-3 rounded-xl border px-3 py-2 text-xs ${riskTone(cognitive.severity)}`}
+                          >
                             <div className="flex items-center justify-between gap-2 mb-1">
                               <div className="flex items-center gap-1.5 font-black uppercase tracking-widest text-[10px]">
-                                {cognitive.contradiction ? <GitBranch className="h-3.5 w-3.5" /> : <Brain className="h-3.5 w-3.5" />}
-                                <span>{cognitive.contradiction ? 'Premise tension' : primaryFallacy ? primaryFallacy.label : 'Cognitive signal'}</span>
+                                {cognitive.contradiction ? (
+                                  <GitBranch className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Brain className="h-3.5 w-3.5" />
+                                )}
+                                <span>
+                                  {cognitive.contradiction
+                                    ? "Premise tension"
+                                    : primaryFallacy
+                                      ? primaryFallacy.label
+                                      : "Cognitive signal"}
+                                </span>
                               </div>
-                              <span className="font-mono font-bold text-[10px]">{riskLabel(cognitive.riskScore)}</span>
+                              <span className="font-mono font-bold text-[10px]">
+                                {riskLabel(cognitive.riskScore)}
+                              </span>
                             </div>
                             <p className="leading-relaxed opacity-90">
-                              {cognitive.contradiction?.summary || primaryFallacy?.rationale || `Logic ${riskLabel(cognitive.dimensions?.logic)} · Evidence ${riskLabel(cognitive.dimensions?.evidence)} · Relevance ${riskLabel(cognitive.dimensions?.relevance)}`}
+                              {cognitive.contradiction?.summary ||
+                                primaryFallacy?.rationale ||
+                                `Logic ${riskLabel(cognitive.dimensions?.logic)} · Evidence ${riskLabel(cognitive.dimensions?.evidence)} · Relevance ${riskLabel(cognitive.dimensions?.relevance)}`}
                             </p>
                           </div>
                         )}
@@ -836,9 +1054,14 @@ const DebateArena = ({ socket = null, user = null }) => {
                           <div className="mt-3 p-3 rounded-xl border border-amber-500/30 bg-amber-950/20 text-amber-200 animate-pulse">
                             <div className="flex items-center gap-2 mb-1">
                               <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
-                              <span className="text-xs font-bold uppercase text-amber-500">AI Judge Deliberating...</span>
+                              <span className="text-xs font-bold uppercase text-amber-500">
+                                AI Judge Deliberating...
+                              </span>
                             </div>
-                            <p className="text-sm italic opacity-80">"Analyzing the logical structure and factual merit of this claim. Please wait."</p>
+                            <p className="text-sm italic opacity-80">
+                              "Analyzing the logical structure and factual merit
+                              of this claim. Please wait."
+                            </p>
                           </div>
                         )}
 
@@ -846,33 +1069,49 @@ const DebateArena = ({ socket = null, user = null }) => {
                           <div className="mt-3 p-3 rounded-xl border border-rose-500/50 bg-rose-950/30 text-rose-200">
                             <div className="flex items-center gap-2 mb-1">
                               <Scale className="h-4 w-4 text-amber-500" />
-                              <span className="text-xs font-bold uppercase text-amber-500">AI Judge Ruling</span>
+                              <span className="text-xs font-bold uppercase text-amber-500">
+                                AI Judge Ruling
+                              </span>
                             </div>
                             {interventions[message?.id].flagged ? (
                               <p className="text-sm">
-                                <span className="font-bold text-rose-400 uppercase mr-2">[{interventions[message.id].type}]</span>
+                                <span className="font-bold text-rose-400 uppercase mr-2">
+                                  [{interventions[message.id].type}]
+                                </span>
                                 {interventions[message.id].reason}
                               </p>
                             ) : (
-                              <p className="text-sm text-emerald-400 italic">"Objection overruled. The claim holds logical merit."</p>
+                              <p className="text-sm text-emerald-400 italic">
+                                "Objection overruled. The claim holds logical
+                                merit."
+                              </p>
                             )}
                           </div>
                         )}
 
                         {/* Objection Button */}
-                        {ENABLE_AI_OBJECTION && playerRole !== 'Spectator' && message?.speaker !== playerRole && !hasUsedLifeline && !interventions[message?.id] && (
-                          <button
-                            onClick={() => handleSummonAIJudge(message?.id)}
-                            disabled={objectionLoadingId !== null}
-                            className="mt-3 text-xs font-bold uppercase text-slate-500 hover:text-amber-500 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {objectionLoadingId === message?.id ? (
-                              <><Loader2 className="h-3 w-3 animate-spin text-amber-500" /> Evaluating...</>
-                            ) : (
-                              <><Gavel className="h-3 w-3" /> Objection!</>
-                            )}
-                          </button>
-                        )}
+                        {ENABLE_AI_OBJECTION &&
+                          playerRole !== "Spectator" &&
+                          message?.speaker !== playerRole &&
+                          !hasUsedLifeline &&
+                          !interventions[message?.id] && (
+                            <button
+                              onClick={() => handleSummonAIJudge(message?.id)}
+                              disabled={objectionLoadingId !== null}
+                              className="mt-3 text-xs font-bold uppercase text-slate-500 hover:text-amber-500 flex items-center gap-1 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {objectionLoadingId === message?.id ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin text-amber-500" />{" "}
+                                  Evaluating...
+                                </>
+                              ) : (
+                                <>
+                                  <Gavel className="h-3 w-3" /> Objection!
+                                </>
+                              )}
+                            </button>
+                          )}
                       </div>
                     </div>
                   );
@@ -882,15 +1121,16 @@ const DebateArena = ({ socket = null, user = null }) => {
           </div>
 
           {/* Input */}
-          {playerRole !== 'Spectator' && (
+          {playerRole !== "Spectator" && (
             <div className="shrink-0 border-t border-slate-700/60 pt-2 pb-2 sm:pt-4 sm:pb-4 mt-auto">
-
               {/* Scratchpad Prompt — appears when turn transitions to user with scratchpad content */}
               {showScratchpadPrompt && (
                 <div className="mb-2 flex items-center gap-2 bg-amber-950/30 border border-amber-500/30 rounded-xl px-3 py-2 animate-in slide-in-from-bottom duration-300">
                   <NotebookPen className="h-4 w-4 text-amber-400 shrink-0" />
                   <p className="text-xs text-amber-200 flex-1 truncate">
-                    <span className="font-bold">Scratchpad:</span> {scratchpadText.slice(0, 80)}{scratchpadText.length > 80 ? '…' : ''}
+                    <span className="font-bold">Scratchpad:</span>{" "}
+                    {scratchpadText.slice(0, 80)}
+                    {scratchpadText.length > 80 ? "…" : ""}
                   </p>
                   <button
                     onClick={useScratchpad}
@@ -912,9 +1152,13 @@ const DebateArena = ({ socket = null, user = null }) => {
                 <div className="mb-2 bg-slate-900/70 border border-red-500/20 rounded-xl px-3 py-2">
                   <div className="flex items-center gap-1.5 mb-1">
                     <NotebookPen className="h-3 w-3 text-red-400" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">Private Scratchpad</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-red-400">
+                      Private Scratchpad
+                    </span>
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">{scratchpadText}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {scratchpadText}
+                  </p>
                 </div>
               )}
 
@@ -936,13 +1180,16 @@ const DebateArena = ({ socket = null, user = null }) => {
                     onKeyDown={handleKeyDown}
                     disabled={isInputDisabled}
                     placeholder={
-                      matchStatus === 'finished' ? 'Match concluded'
-                        : isInputDisabled ? `Waiting for ${activeSpeaker}'s turn…`
-                          : isListening ? 'Listening… speak your argument'
-                            : 'Type your argument… (Enter to send)'
+                      matchStatus === "finished"
+                        ? "Match concluded"
+                        : isInputDisabled
+                          ? `Waiting for ${activeSpeaker}'s turn…`
+                          : isListening
+                            ? "Listening… speak your argument"
+                            : "Type your argument… (Enter to send)"
                     }
                     className="w-full rounded-xl border border-slate-600 bg-slate-800 p-1 px-4 sm:p-3 sm:px-4 text-slate-100 placeholder-slate-500 transition focus:border-cyan-500/50 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-hidden"
-                    style={{ minHeight: '40px', maxHeight: '120px' }}
+                    style={{ minHeight: "40px", maxHeight: "120px" }}
                     rows={1}
                   />
                 </div>
@@ -953,7 +1200,7 @@ const DebateArena = ({ socket = null, user = null }) => {
                     volume={volume}
                     isListening={isListening}
                     isMyTurn={isMyTurn}
-                    isDisabled={matchStatus !== 'active'}
+                    isDisabled={matchStatus !== "active"}
                     onClick={startListening}
                     error={voiceError}
                   />
@@ -979,7 +1226,9 @@ const DebateArena = ({ socket = null, user = null }) => {
         <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-sm">
           <div className="text-center bg-slate-900 border border-slate-700/50 p-8 rounded-2xl shadow-2xl">
             <Loader2 className="h-12 w-12 animate-spin text-cyan-500 mx-auto mb-6" />
-            <h2 className="text-3xl font-bold text-slate-100 mb-2">DEBATE CONCLUDED!</h2>
+            <h2 className="text-3xl font-bold text-slate-100 mb-2">
+              DEBATE CONCLUDED!
+            </h2>
             <p className="text-lg text-slate-400">Heading to Deliberation...</p>
           </div>
         </div>

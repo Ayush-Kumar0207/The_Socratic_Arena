@@ -27,7 +27,7 @@ The panel intentionally rewards direct reasoning, truthful calibration, reliable
 
 - Separate rating records for Ranked Classic and topic domains.
 - Founders Season progress and divisions.
-- Verified tournament registration and extensible brackets.
+- Verified tournament registration, deterministic seeded brackets, result propagation, champion settlement, and winner credentials.
 - Clubs with owners, members, institutions, cities, and public/private visibility.
 - Shareable result identity from both practice and match review.
 
@@ -41,7 +41,7 @@ The panel intentionally rewards direct reasoning, truthful calibration, reliable
 ### Safety and credentials
 
 - Moderation reports linked to a user and/or match while preserving evidence.
-- Portable, verifiable credential records.
+- HMAC-signed, public-code-verifiable credentials for reasoning, classroom completion, tournaments, and 2v2 wins.
 - Organization privacy and retention settings in the data model.
 
 ## Database installation
@@ -50,9 +50,10 @@ Run the existing `schema.sql`, then apply migrations in numeric order. Existing 
 
 ```text
 backend/migrations/004_arena_os.sql
+backend/migrations/005_launch_readiness.sql
 ```
 
-The application remains compatible before this migration is applied: existing live debates and result screens continue to work, and Arena OS shows preview/catalog data. Mutating Arena OS workflows return a clear setup error until the new tables exist.
+Migration `005` adds the protected workflow tables, core RLS policies, service-only atomic voting RPC, real-cohort percentiles, moderation enforcement/appeals, benchmark history, and persistent 2v2 state. Existing live debates and result screens remain backward-compatible while it is applied.
 
 ## API surface
 
@@ -82,4 +83,11 @@ All Arena OS routes require the current Supabase bearer token.
 
 ## Next production integrations
 
-The schema and user workflows are ready for external LMS/SSO, plagiarism providers, evidence-retrieval providers, video clip rendering, and formal human calibration datasets. Those require institution/vendor credentials and are deliberately represented as integration boundaries rather than simulated external connections.
+The built-in workflows now cover classroom join/assign/submit/grade/export, retrieved-source evidence checks, tournaments, moderation and appeals, credential verification, calibrated judging, and persistent 2v2. External LMS/SSO, commercial plagiarism providers, and rendered social video still require institution/vendor credentials and remain explicit integration boundaries.
+
+## Launch verification
+
+- `npm test` in `backend` validates percentile, brackets, team turn order, signatures, evidence retrieval/SSRF protection, rate limits, RLS migration content, and calibration data.
+- `npm run benchmark:judge:dry` validates the human-labelled benchmark; run `npm run benchmark:judge` with production credentials to execute the blind three-judge panel and persist measured parity results.
+- `npm run test:e2e` in `frontend` runs the two-browser reconnect/judging/vote/appeal gate plus the teacher/student classroom lifecycle.
+- Set `REDIS_URL` in multi-instance deployments. Socket.IO uses its Redis adapter plus durable room state, distributed matchmaking, presence, and timer leases. Load balancers should prefer WebSocket and retain sticky sessions when falling back to long polling.

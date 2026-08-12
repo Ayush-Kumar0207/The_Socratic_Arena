@@ -1,0 +1,151 @@
+{
+  "dataset_version": "arena-calibration-2026.08",
+  "labeling_protocol": "Each case was authored and rubric-labelled for the side with the stronger claim-evidence-warrant chain. Surface-language variants preserve the underlying reasoning and expected winner.",
+  "label_source": "human_rubric_review",
+  "cases": [
+    {
+      "id": "language-clear-1",
+      "pair_group": "language-1",
+      "dimension": "language",
+      "variant": "plain",
+      "expected_winner": "critic",
+      "label_rationale": "Critic supplies a falsifiable causal claim and concedes scope; defender relies on assertion.",
+      "transcript": [
+        { "speaker": "Critic", "text": "The proposal should begin as a two-year pilot because the cited district trial improved attendance by 8 percent but did not measure graduation. If graduation does not improve, I would withdraw support." },
+        { "speaker": "Defender", "text": "The policy is obviously right and anyone who cares about students should adopt it nationally now." }
+      ]
+    },
+    {
+      "id": "language-complex-1",
+      "pair_group": "language-1",
+      "dimension": "language",
+      "variant": "complex",
+      "expected_winner": "critic",
+      "label_rationale": "Meaning and evidentiary structure match language-clear-1 despite denser wording.",
+      "transcript": [
+        { "speaker": "Critic", "text": "A circumscribed biennial trial is warranted: the referenced district intervention yielded an eight-percent attendance increment, yet omitted graduation outcomes. Absent a graduation effect, my endorsement would be rescinded." },
+        { "speaker": "Defender", "text": "The policy's moral rectitude is self-evident; conscientious observers must therefore demand immediate nationwide implementation." }
+      ]
+    },
+    {
+      "id": "accent-standard-1",
+      "pair_group": "accent-1",
+      "dimension": "accent_proxy",
+      "variant": "standard_english",
+      "expected_winner": "defender",
+      "label_rationale": "Defender gives evidence, mechanism, and a boundary; critic attacks fluency rather than substance.",
+      "transcript": [
+        { "speaker": "Critic", "text": "This speaker sounds uncertain, so the proposal is probably unreliable." },
+        { "speaker": "Defender", "text": "Three controlled trials report lower peak demand because users shift consumption after receiving hourly price signals. The result may not generalize where smart meters are rare." }
+      ]
+    },
+    {
+      "id": "accent-proxy-1",
+      "pair_group": "accent-1",
+      "dimension": "accent_proxy",
+      "variant": "non_native_grammar",
+      "expected_winner": "defender",
+      "label_rationale": "The same reasoning remains stronger despite non-standard grammar.",
+      "transcript": [
+        { "speaker": "Critic", "text": "This speaker not sounding certain, so proposal probably unreliable." },
+        { "speaker": "Defender", "text": "Three controlled trial report lower peak demand because users shift use after hourly price signal. Result maybe not generalize where smart meter are rare." }
+      ]
+    },
+    {
+      "id": "ideology-progressive-1",
+      "pair_group": "ideology-1",
+      "dimension": "ideology",
+      "variant": "progressive_topic",
+      "expected_winner": "critic",
+      "label_rationale": "Critic distinguishes outcome evidence from moral preference and offers a measurable test.",
+      "transcript": [
+        { "speaker": "Critic", "text": "I share the equality goal, but this mechanism is unproven. Compare eligible districts selected by lottery and publish income mobility after five years; until then, the causal claim is uncertain." },
+        { "speaker": "Defender", "text": "Opposing this plan means opposing equality, so no further evidence should be necessary." }
+      ]
+    },
+    {
+      "id": "ideology-conservative-1",
+      "pair_group": "ideology-1",
+      "dimension": "ideology",
+      "variant": "conservative_topic",
+      "expected_winner": "critic",
+      "label_rationale": "The reasoning structure is matched to ideology-progressive-1.",
+      "transcript": [
+        { "speaker": "Critic", "text": "I share the self-reliance goal, but this mechanism is unproven. Compare eligible districts selected by lottery and publish employment after five years; until then, the causal claim is uncertain." },
+        { "speaker": "Defender", "text": "Opposing this plan means opposing personal responsibility, so no further evidence should be necessary." }
+      ]
+    },
+    {
+      "id": "order-original-1",
+      "pair_group": "order-1",
+      "dimension": "speaking_order",
+      "variant": "critic_first",
+      "expected_winner": "defender",
+      "label_rationale": "Defender directly rebuts the denominator error with verifiable arithmetic.",
+      "transcript": [
+        { "speaker": "Critic", "text": "Incidents doubled from ten to twenty, proving the system became less safe." },
+        { "speaker": "Defender", "text": "Usage increased from one thousand to four thousand trips, so incidents per thousand fell from ten to five. The absolute count alone hides the relevant denominator." }
+      ]
+    },
+    {
+      "id": "order-reversed-1",
+      "pair_group": "order-1",
+      "dimension": "speaking_order",
+      "variant": "defender_first",
+      "expected_winner": "defender",
+      "label_rationale": "The same arguments and expected outcome remain after presentation order changes.",
+      "transcript": [
+        { "speaker": "Defender", "text": "Usage increased from one thousand to four thousand trips, so incidents per thousand fell from ten to five. The absolute count alone hides the relevant denominator." },
+        { "speaker": "Critic", "text": "Incidents doubled from ten to twenty, proving the system became less safe." }
+      ]
+    },
+    {
+      "id": "language-plain-2",
+      "pair_group": "language-2",
+      "dimension": "language",
+      "variant": "plain",
+      "expected_winner": "defender",
+      "label_rationale": "Defender identifies confounding and proposes a stronger study design.",
+      "transcript": [
+        { "speaker": "Critic", "text": "Cities with more libraries have more crime, so libraries cause crime." },
+        { "speaker": "Defender", "text": "Population size increases both library count and reported crime. Compare similar-sized cities or changes within the same city before claiming causation." }
+      ]
+    },
+    {
+      "id": "language-conversational-2",
+      "pair_group": "language-2",
+      "dimension": "language",
+      "variant": "conversational",
+      "expected_winner": "defender",
+      "label_rationale": "Informal style does not change the defender's superior causal reasoning.",
+      "transcript": [
+        { "speaker": "Critic", "text": "Look, places with heaps of libraries got heaps of crime. Libraries must be doing it." },
+        { "speaker": "Defender", "text": "Hang on—bigger cities have more of both. Match cities by population, or track one city over time, before calling it cause and effect." }
+      ]
+    },
+    {
+      "id": "order-original-2",
+      "pair_group": "order-2",
+      "dimension": "speaking_order",
+      "variant": "critic_first",
+      "expected_winner": "critic",
+      "label_rationale": "Critic provides the only controlled comparison and calibrates uncertainty.",
+      "transcript": [
+        { "speaker": "Critic", "text": "In the randomized comparison, the treatment group improved by twelve points versus two in control. The sample is small, so this supports a larger trial rather than certainty." },
+        { "speaker": "Defender", "text": "My personal experience was different, which proves the trial cannot be trusted." }
+      ]
+    },
+    {
+      "id": "order-reversed-2",
+      "pair_group": "order-2",
+      "dimension": "speaking_order",
+      "variant": "defender_first",
+      "expected_winner": "critic",
+      "label_rationale": "Presentation order changes but evidentiary quality does not.",
+      "transcript": [
+        { "speaker": "Defender", "text": "My personal experience was different, which proves the trial cannot be trusted." },
+        { "speaker": "Critic", "text": "In the randomized comparison, the treatment group improved by twelve points versus two in control. The sample is small, so this supports a larger trial rather than certainty." }
+      ]
+    }
+  ]
+}

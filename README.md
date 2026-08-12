@@ -370,7 +370,7 @@ cd frontend && npm install && npm run dev
 
 1. Create a new project on [Supabase](https://supabase.com)
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
-3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/004_arena_os.sql` in numeric order (existing deployments can apply only unapplied migrations)
+3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/005_launch_readiness.sql` in numeric order (existing deployments can apply only unapplied migrations)
 4. Review the included Row Level Security policies for your organization’s privacy requirements
 5. Copy your project URL and service key into `backend/.env`
 

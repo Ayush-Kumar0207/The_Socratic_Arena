@@ -1,16 +1,54 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
-import { ArrowLeft, User, Clock, Trophy, Vote, BarChart3, Target, Play, Square, Loader2, Share2, Download, Sparkles, Quote } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import TrustResultPanel from './TrustResultPanel';
+import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
+import {
+  ArrowLeft,
+  User,
+  Clock,
+  Trophy,
+  Vote,
+  BarChart3,
+  Target,
+  Play,
+  Square,
+  Loader2,
+  Share2,
+  Download,
+  Sparkles,
+  Quote,
+} from "lucide-react";
+import html2canvas from "html2canvas";
+import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
+import TrustResultPanel from "./TrustResultPanel";
+import api from "../services/api";
+
+const E2E_TEST_AUTH = import.meta.env.VITE_E2E_TEST_AUTH === "true";
+const e2eUser = () => {
+  const id =
+    new URLSearchParams(window.location.search).get("e2eUser") ||
+    sessionStorage.getItem("socratic-e2e-user") ||
+    "e2e-user";
+  return { id, email: `${id}@example.test`, user_metadata: { username: id } };
+};
 
 const MatchReview = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const [match, setMatch] = useState(null);
-  const ENABLE_AI_HIGHLIGHTS = false; // Toggle to true to reveal highlights section
+  const ENABLE_AI_HIGHLIGHTS = true;
   const [loading, setLoading] = useState(true);
   const [hasVoted, setHasVoted] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -23,7 +61,7 @@ const MatchReview = () => {
   // Memoize the chart data to prevent flickering
   const radarData = useMemo(() => {
     if (!match?.ai_scores) return [];
-    
+
     // Helper to extract numeric score safely
     const getScore = (player, metric) => {
       const val = player?.[metric.toLowerCase()] ?? player?.[metric] ?? 0;
@@ -32,57 +70,79 @@ const MatchReview = () => {
 
     return [
       {
-        subject: 'Logic',
-        Critic: getScore(match.ai_scores.critic, 'Logic'),
-        Defender: getScore(match.ai_scores.defender, 'Logic'),
-        fullMark: 10
+        subject: "Logic",
+        Critic: getScore(match.ai_scores.critic, "Logic"),
+        Defender: getScore(match.ai_scores.defender, "Logic"),
+        fullMark: 10,
       },
       {
-        subject: 'Facts',
-        Critic: getScore(match.ai_scores.critic, 'Facts'),
-        Defender: getScore(match.ai_scores.defender, 'Facts'),
-        fullMark: 10
+        subject: "Facts",
+        Critic: getScore(match.ai_scores.critic, "Facts"),
+        Defender: getScore(match.ai_scores.defender, "Facts"),
+        fullMark: 10,
       },
       {
-        subject: 'Relevance',
-        Critic: getScore(match.ai_scores.critic, 'Relevance'),
-        Defender: getScore(match.ai_scores.defender, 'Relevance'),
-        fullMark: 10
+        subject: "Relevance",
+        Critic: getScore(match.ai_scores.critic, "Relevance"),
+        Defender: getScore(match.ai_scores.defender, "Relevance"),
+        fullMark: 10,
       },
     ];
   }, [match?.ai_scores]);
 
   // Block the chart from re-rendering unless the data actually changes
-  const memoizedRadarChart = useMemo(() => (
-    <ResponsiveContainer width="100%" height={300}>
-      <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-        <PolarGrid stroke="#334155" />
-        <PolarAngleAxis 
-          dataKey="subject" 
-          tick={{ fill: '#94a3b8', fontSize: 14, fontWeight: 500 }} 
-        />
-        <PolarRadiusAxis angle={30} domain={[0, 10]} tick={false} axisLine={false} />
-        <Radar name="Critic" dataKey="Critic" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.5} isAnimationActive={false} />
-        <Radar name="Defender" dataKey="Defender" stroke="#6366f1" fill="#6366f1" fillOpacity={0.5} isAnimationActive={false} />
-      </RadarChart>
-    </ResponsiveContainer>
-  ), [radarData]);
+  const memoizedRadarChart = useMemo(
+    () => (
+      <ResponsiveContainer width="100%" height={300}>
+        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+          <PolarGrid stroke="#334155" />
+          <PolarAngleAxis
+            dataKey="subject"
+            tick={{ fill: "#94a3b8", fontSize: 14, fontWeight: 500 }}
+          />
+          <PolarRadiusAxis
+            angle={30}
+            domain={[0, 10]}
+            tick={false}
+            axisLine={false}
+          />
+          <Radar
+            name="Critic"
+            dataKey="Critic"
+            stroke="#f43f5e"
+            fill="#f43f5e"
+            fillOpacity={0.5}
+            isAnimationActive={false}
+          />
+          <Radar
+            name="Defender"
+            dataKey="Defender"
+            stroke="#6366f1"
+            fill="#6366f1"
+            fillOpacity={0.5}
+            isAnimationActive={false}
+          />
+        </RadarChart>
+      </ResponsiveContainer>
+    ),
+    [radarData],
+  );
 
   const exportHighlight = async (index) => {
     setExportingId(index);
     try {
       const element = document.getElementById(`highlight-card-${index}`);
       if (!element) return;
-      
+
       const canvas = await html2canvas(element, {
-        backgroundColor: '#020617', // Match slate-950 background
-        scale: 2, 
+        backgroundColor: "#020617", // Match slate-950 background
+        scale: 2,
         logging: false,
-        useCORS: true
+        useCORS: true,
       });
-      
-      const image = canvas.toDataURL('image/png', 1.0);
-      const link = document.createElement('a');
+
+      const image = canvas.toDataURL("image/png", 1.0);
+      const link = document.createElement("a");
       link.download = `SocraticArena_Highlight_${index + 1}.png`;
       link.href = image;
       link.click();
@@ -94,20 +154,27 @@ const MatchReview = () => {
     }
   };
 
-  const fetchVotes = async (matchIdArg, userIdArg) => {
-    const targetMatchId = matchIdArg || matchId;
-    const { data: voteData, error: voteError } = await supabase
-      .from('votes')
-      .select('*')
-      .eq('match_id', targetMatchId)
-      .eq('voter_id', userIdArg || currentUser?.id);
-    if (voteData?.length > 0 && !voteError) {
-      setHasVoted(true);
-    }
-    // Re-fetch match to get the latest aggregated vote counts
-    const { data: freshMatch } = await supabase.from('matches').select('*').eq('id', targetMatchId).single();
-    if (freshMatch) setMatch(freshMatch);
-  };
+  const fetchVotes = useCallback(
+    async (matchIdArg) => {
+      const targetMatchId = matchIdArg || matchId;
+      try {
+        const response = await api.get(
+          `/product/matches/${targetMatchId}/vote`,
+        );
+        setHasVoted(Boolean(response.data.has_voted));
+      } catch (error) {
+        console.warn("Unable to refresh vote state:", error.message);
+      }
+      // Re-fetch match to get the latest aggregated vote counts
+      const { data: freshMatch } = await supabase
+        .from("matches")
+        .select("*")
+        .eq("id", targetMatchId)
+        .single();
+      if (freshMatch) setMatch(freshMatch);
+    },
+    [matchId],
+  );
 
   useEffect(() => {
     let pollCount = 0;
@@ -116,22 +183,24 @@ const MatchReview = () => {
     const fetchMatchData = async () => {
       try {
         // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
+        const user = E2E_TEST_AUTH
+          ? e2eUser()
+          : (await supabase.auth.getUser()).data.user;
         if (!user) {
-          navigate('/');
+          navigate("/");
           return;
         }
         setCurrentUser(user);
 
         // Fetch match data
         const { data: matchData, error: matchError } = await supabase
-          .from('matches')
-          .select('*')
-          .eq('id', matchId)
+          .from("matches")
+          .select("*")
+          .eq("id", matchId)
           .single();
 
         if (matchError) {
-          console.error('Error fetching match:', matchError);
+          console.error("Error fetching match:", matchError);
           setLoading(false);
           return;
         }
@@ -140,31 +209,20 @@ const MatchReview = () => {
         setMatch(matchData);
         setDisplayedTranscript(matchData.transcript || []);
 
-        // Check if user has already voted
-        const { data: voteData, error: voteError } = await supabase
-          .from('votes')
-          .select('*')
-          .eq('match_id', matchId)
-          .eq('voter_id', user.id)
-          .single();
-
-        if (voteData && !voteError) {
-          setHasVoted(true);
-        }
+        await fetchVotes(matchId);
 
         // Poll for AI scores if match is completed but scores are missing
-        if (matchData.status === 'completed' && !matchData.ai_scores) {
+        if (matchData.status === "completed" && !matchData.ai_scores) {
           pollCount++;
           if (pollCount >= 10) {
             clearInterval(pollInterval);
-            setMatch(prev => ({ ...prev, legacy_fallback: true }));
+            setMatch((prev) => ({ ...prev, legacy_fallback: true }));
           }
         } else if (matchData.ai_scores) {
           clearInterval(pollInterval);
         }
-
       } catch (err) {
-        console.error('Error fetching match data:', err);
+        console.error("Error fetching match data:", err);
       } finally {
         setLoading(false);
       }
@@ -178,7 +236,7 @@ const MatchReview = () => {
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [matchId, navigate]);
+  }, [fetchVotes, matchId, navigate]);
 
   // Real-time listener for match updates (votes & AI scores)
   useEffect(() => {
@@ -187,20 +245,20 @@ const MatchReview = () => {
     const channel = supabase
       .channel(`match_updates_${matchId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'matches',
+          event: "UPDATE",
+          schema: "public",
+          table: "matches",
           filter: `id=eq.${matchId}`,
         },
         (payload) => {
-          console.log('Real-time match update:', payload.new);
+          console.log("Real-time match update:", payload.new);
           setMatch(payload.new);
           if (payload.new.transcript) {
             setDisplayedTranscript(payload.new.transcript);
           }
-        }
+        },
       )
       .subscribe();
 
@@ -215,12 +273,12 @@ const MatchReview = () => {
   // Auto-scroll to bottom only once when transcript initial load happens
   useEffect(() => {
     if (hasTranscript && !hasScrolledRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       hasScrolledRef.current = true;
     }
   }, [hasTranscript]);
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const startReplay = async () => {
     if (!match?.transcript) return;
@@ -239,7 +297,7 @@ const MatchReview = () => {
         const prevMessage = match.transcript[i - 1];
         const prevTime = new Date(prevMessage.timestamp).getTime();
         const currTime = new Date(message.timestamp).getTime();
-        const diff = (prevTime && currTime) ? (currTime - prevTime) : 1000;
+        const diff = prevTime && currTime ? currTime - prevTime : 1000;
         const clampedDelay = Math.max(800, Math.min(2500, diff));
 
         await sleep(clampedDelay);
@@ -247,7 +305,7 @@ const MatchReview = () => {
 
       if (!isPlayingRef.current) break;
 
-      setDisplayedTranscript(prev => [...prev, message]);
+      setDisplayedTranscript((prev) => [...prev, message]);
     }
 
     setIsPlaying(false);
@@ -264,40 +322,33 @@ const MatchReview = () => {
     if (!currentUser || !match) return;
 
     try {
-      const { error } = await supabase
-        .from('votes')
-        .insert({
-          match_id: match.id,
-          voter_id: currentUser.id,
-          voted_for: votedForId
-        });
-
-      if (error) {
-        console.error('Error voting:', error);
-        return;
-      }
-
-      // ── ATOMIC UPDATE: count actual vote rows instead of incrementing stale local value ──
-      // This prevents the race condition where two clients both read 0 and write 0+1=1.
-      const { data: allVotes, error: countError } = await supabase
-        .from('votes')
-        .select('voted_for')
-        .eq('match_id', match.id);
-
-      if (!countError && allVotes) {
-        const criticCount = allVotes.filter(v => v.voted_for === match.critic_id).length;
-        const defenderCount = allVotes.filter(v => v.voted_for === match.defender_id).length;
-        await supabase.from('matches').update({
-          audience_votes_critic: criticCount,
-          audience_votes_defender: defenderCount
-        }).eq('id', match.id);
-      }
-
+      await api.post(`/product/matches/${match.id}/vote`, {
+        voted_for: votedForId,
+      });
       setHasVoted(true);
-      // Force a fresh fetch from DB to get the true total
-      await fetchVotes(match.id, currentUser.id);
+      await fetchVotes(match.id);
     } catch (err) {
-      console.error('Error submitting vote:', err);
+      console.error("Error submitting vote:", err);
+      window.alert(err.response?.data?.message || "Unable to submit vote.");
+    }
+  };
+
+  const exportTranscript = async (format) => {
+    try {
+      const response = await api.get(`/product/matches/${match.id}/export`, {
+        params: { format },
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `socratic-arena-${match.id.slice(0, 8)}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      window.alert(
+        error.response?.data?.message || "Transcript export failed.",
+      );
     }
   };
 
@@ -319,8 +370,13 @@ const MatchReview = () => {
       <div className="flex flex-col h-screen bg-slate-950 text-slate-200 p-8">
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-slate-100 mb-4">Match Not Found</h1>
-            <p className="text-slate-400">The match you're looking for doesn't exist or you don't have access to it.</p>
+            <h1 className="text-4xl font-bold text-slate-100 mb-4">
+              Match Not Found
+            </h1>
+            <p className="text-slate-400">
+              The match you're looking for doesn't exist or you don't have
+              access to it.
+            </p>
             <button
               onClick={() => navigate(-1)}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-500/40 bg-slate-950/40 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-slate-200 transition hover:border-slate-400 hover:text-slate-100 mt-6"
@@ -336,15 +392,26 @@ const MatchReview = () => {
 
   // Calculate scores for winner dynamically with safety checks
   const criticAiTotal = match?.ai_scores?.critic
-    ? (match.ai_scores.critic.logic || 0) + (match.ai_scores.critic.facts || 0) + (match.ai_scores.critic.relevance || 0)
+    ? (match.ai_scores.critic.logic || 0) +
+      (match.ai_scores.critic.facts || 0) +
+      (match.ai_scores.critic.relevance || 0)
     : 0;
   const defenderAiTotal = match?.ai_scores?.defender
-    ? (match.ai_scores.defender.logic || 0) + (match.ai_scores.defender.facts || 0) + (match.ai_scores.defender.relevance || 0)
+    ? (match.ai_scores.defender.logic || 0) +
+      (match.ai_scores.defender.facts || 0) +
+      (match.ai_scores.defender.relevance || 0)
     : 0;
 
-  const final_score_critic = criticAiTotal + ((match?.audience_votes_critic || 0) * 2);
-  const final_score_defender = defenderAiTotal + ((match?.audience_votes_defender || 0) * 2);
-  const winner = final_score_critic > final_score_defender ? 'Critic' : (final_score_defender > final_score_critic ? 'Defender' : 'Tie');
+  const final_score_critic =
+    criticAiTotal + (match?.audience_votes_critic || 0) * 2;
+  const final_score_defender =
+    defenderAiTotal + (match?.audience_votes_defender || 0) * 2;
+  const winner =
+    final_score_critic > final_score_defender
+      ? "Critic"
+      : final_score_defender > final_score_critic
+        ? "Defender"
+        : "Tie";
 
   // Safety check: if match is null or undefined, return loading
   if (!match) {
@@ -367,19 +434,36 @@ const MatchReview = () => {
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate("/dashboard")}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-500/40 bg-slate-950/40 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-slate-200 transition hover:border-slate-400 hover:text-slate-100"
             >
               <ArrowLeft className="h-4 w-4" />
               Back
             </button>
 
-            <div className="flex items-center gap-4">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${match.status === 'pending_votes'
-                ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
-                : 'bg-green-500/20 text-green-300 border border-green-500/30'
-                }`}>
-                {match.status === 'pending_votes' ? 'Pending Votes' : 'Completed'}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={() => exportTranscript("txt")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-cyan-500/50"
+              >
+                <Download className="h-3.5 w-3.5" /> TXT
+              </button>
+              <button
+                onClick={() => exportTranscript("pdf")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-bold text-slate-300 hover:border-cyan-500/50"
+              >
+                <Download className="h-3.5 w-3.5" /> PDF
+              </button>
+              <span
+                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  match.status === "pending_votes"
+                    ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
+                    : "bg-green-500/20 text-green-300 border border-green-500/30"
+                }`}
+              >
+                {match.status === "pending_votes"
+                  ? "Pending Votes"
+                  : "Completed"}
               </span>
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Clock className="h-4 w-4" />
@@ -398,77 +482,97 @@ const MatchReview = () => {
           {/* AI Highlights Section - Managed by Feature Flag */}
           {ENABLE_AI_HIGHLIGHTS && (
             <>
-              {match.status === 'pending_votes' ? (
-            <div className="mb-8">
-              <h3 className="text-xl font-bold text-slate-100 mb-4 flex items-center gap-2">
-                <Sparkles className="h-6 w-6 text-yellow-400" /> AI Highlights
-              </h3>
-              <div className="p-6 bg-slate-800/50 border border-slate-700 rounded-xl text-center text-slate-400 italic">
-                Highlights will be generated by the AI Judge once the voting period concludes.
-              </div>
-            </div>
-          ) : match.status === 'completed' ? (
-            <div className="mb-8">
-              <h3 className="text-xl font-bold text-slate-100 mb-4 flex items-center gap-2">
-                <Sparkles className="h-6 w-6 text-yellow-400" /> AI Highlights
-              </h3>
-              {match.highlights && match.highlights.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {match.highlights.map((highlight, idx) => (
-                    <div key={idx} className="flex flex-col gap-3">
-                      <div 
-                        id={`highlight-card-${idx}`}
-                        className="relative overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-950 p-6 shadow-2xl"
-                      >
-                        <div className="absolute -top-12 -right-12 h-32 w-32 rounded-full bg-cyan-500/10 blur-3xl"></div>
-                        <div className="absolute -bottom-12 -left-12 h-32 w-32 rounded-full bg-rose-500/10 blur-3xl"></div>
-                        
-                        <Quote className="h-8 w-8 text-slate-700 mb-4 opacity-50" />
-                        
-                        <p className="text-lg md:text-xl font-medium text-slate-200 mb-6 italic leading-relaxed relative z-10">
-                          "{highlight.quote}"
-                        </p>
-                        
-                        <div className="flex items-center justify-between border-t border-slate-800 pt-4 mt-auto relative z-10">
-                          <div className="flex flex-col">
-                            <span className={`text-sm font-bold uppercase tracking-wider ${highlight.author_role?.toLowerCase() === 'critic' ? 'text-rose-400' : 'text-cyan-400'}`}>
-                              {highlight.author_role}
-                            </span>
-                            <span className="text-xs text-slate-500 max-w-[200px] truncate" title={match.topic}>
-                              The Socratic Arena
-                            </span>
+              {match.status === "pending_votes" ? (
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold text-slate-100 mb-4 flex items-center gap-2">
+                    <Sparkles className="h-6 w-6 text-yellow-400" /> AI
+                    Highlights
+                  </h3>
+                  <div className="p-6 bg-slate-800/50 border border-slate-700 rounded-xl text-center text-slate-400 italic">
+                    Highlights will be generated by the AI Judge once the voting
+                    period concludes.
+                  </div>
+                </div>
+              ) : match.status === "completed" ? (
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold text-slate-100 mb-4 flex items-center gap-2">
+                    <Sparkles className="h-6 w-6 text-yellow-400" /> AI
+                    Highlights
+                  </h3>
+                  {match.highlights && match.highlights.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {match.highlights.map((highlight, idx) => (
+                        <div key={idx} className="flex flex-col gap-3">
+                          <div
+                            id={`highlight-card-${idx}`}
+                            className="relative overflow-hidden rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-slate-950 p-6 shadow-2xl"
+                          >
+                            <div className="absolute -top-12 -right-12 h-32 w-32 rounded-full bg-cyan-500/10 blur-3xl"></div>
+                            <div className="absolute -bottom-12 -left-12 h-32 w-32 rounded-full bg-rose-500/10 blur-3xl"></div>
+
+                            <Quote className="h-8 w-8 text-slate-700 mb-4 opacity-50" />
+
+                            <p className="text-lg md:text-xl font-medium text-slate-200 mb-6 italic leading-relaxed relative z-10">
+                              "{highlight.quote}"
+                            </p>
+
+                            <div className="flex items-center justify-between border-t border-slate-800 pt-4 mt-auto relative z-10">
+                              <div className="flex flex-col">
+                                <span
+                                  className={`text-sm font-bold uppercase tracking-wider ${highlight.author_role?.toLowerCase() === "critic" ? "text-rose-400" : "text-cyan-400"}`}
+                                >
+                                  {highlight.author_role}
+                                </span>
+                                <span
+                                  className="text-xs text-slate-500 max-w-[200px] truncate"
+                                  title={match.topic}
+                                >
+                                  The Socratic Arena
+                                </span>
+                              </div>
+
+                              <div className="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2 max-w-[150px]">
+                                <span
+                                  className="text-xs text-slate-300 truncate"
+                                  title={highlight.context}
+                                >
+                                  {highlight.context}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          
-                          <div className="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-2 max-w-[150px]">
-                            <span className="text-xs text-slate-300 truncate" title={highlight.context}>
-                              {highlight.context}
-                            </span>
+
+                          <div className="flex items-center justify-end gap-3 px-2">
+                            <button
+                              onClick={() => exportHighlight(idx)}
+                              disabled={exportingId === idx}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-semibold text-slate-300 transition-colors disabled:opacity-50"
+                            >
+                              {exportingId === idx ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Download className="h-4 w-4" />
+                              )}
+                              Export Card
+                            </button>
                           </div>
                         </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-end gap-3 px-2">
-                        <button 
-                          onClick={() => exportHighlight(idx)}
-                          disabled={exportingId === idx}
-                          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-semibold text-slate-300 transition-colors disabled:opacity-50"
-                        >
-                          {exportingId === idx ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                          Export Card
-                        </button>
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="p-8 rounded-2xl border border-slate-700 bg-slate-900/20 flex flex-col items-center justify-center text-center">
+                      <Sparkles className="h-8 w-8 text-slate-600 mb-3" />
+                      <h3 className="text-lg font-medium text-slate-400">
+                        No highlights available for this match.
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        The AI Judge did not find suitable mic-drop moments or
+                        evaluation failed.
+                      </p>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="p-8 rounded-2xl border border-slate-700 bg-slate-900/20 flex flex-col items-center justify-center text-center">
-                  <Sparkles className="h-8 w-8 text-slate-600 mb-3" />
-                  <h3 className="text-lg font-medium text-slate-400">No highlights available for this match.</h3>
-                  <p className="text-sm text-slate-500">The AI Judge did not find suitable mic-drop moments or evaluation failed.</p>
-                </div>
-              )}
-            </div>
-          ) : null}
+              ) : null}
             </>
           )}
         </div>
@@ -508,14 +612,18 @@ const MatchReview = () => {
               displayedTranscript.map((message, index) => (
                 <div
                   key={message.id || index}
-                  className={`flex ${message.speaker === 'Critic' ? 'justify-start' : 'justify-end'
-                    }`}
+                  className={`flex ${
+                    message.speaker === "Critic"
+                      ? "justify-start"
+                      : "justify-end"
+                  }`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-xl border p-4 backdrop-blur-sm ${message.speaker === 'Critic'
-                      ? 'bg-rose-950/40 border-rose-500/30 text-rose-100'
-                      : 'bg-cyan-950/40 border-cyan-500/30 text-cyan-100'
-                      }`}
+                    className={`max-w-[70%] rounded-xl border p-4 backdrop-blur-sm ${
+                      message.speaker === "Critic"
+                        ? "bg-rose-950/40 border-rose-500/30 text-rose-100"
+                        : "bg-cyan-950/40 border-cyan-500/30 text-cyan-100"
+                    }`}
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-xs font-semibold uppercase tracking-wide opacity-70">
@@ -542,23 +650,31 @@ const MatchReview = () => {
       </div>
 
       {/* Temporary Debug Block */}
-      {!match?.ai_scores && match?.status === 'completed' && !match?.legacy_fallback && (
-        <div className="text-amber-400 p-4 border border-amber-400/50 rounded-xl text-center">
-          Retrieving AI Analysis from database... (If this stays here, ai_scores is null)
-        </div>
-      )}
+      {!match?.ai_scores &&
+        match?.status === "completed" &&
+        !match?.legacy_fallback && (
+          <div className="text-amber-400 p-4 border border-amber-400/50 rounded-xl text-center">
+            Retrieving AI Analysis from database... (If this stays here,
+            ai_scores is null)
+          </div>
+        )}
 
       {/* Legacy Fallback Block */}
-      {!match?.ai_scores && match?.status === 'completed' && match?.legacy_fallback && (
-        <div className="text-amber-400 p-4 border border-amber-400/50 rounded-xl text-center font-semibold">
-          Legacy Match: Detailed AI Analytics are unavailable for matches played before the v2.0 update.
-        </div>
-      )}
+      {!match?.ai_scores &&
+        match?.status === "completed" &&
+        match?.legacy_fallback && (
+          <div className="text-amber-400 p-4 border border-amber-400/50 rounded-xl text-center font-semibold">
+            Legacy Match: Detailed AI Analytics are unavailable for matches
+            played before the v2.0 update.
+          </div>
+        )}
 
       {/* AI Analysis Section */}
       {match?.ai_scores && (
         <div className="w-full max-w-4xl mx-auto mt-8 space-y-6">
-          <h2 className="text-2xl font-bold text-center text-slate-200">AI Cognitive Analysis</h2>
+          <h2 className="text-2xl font-bold text-center text-slate-200">
+            AI Cognitive Analysis
+          </h2>
 
           <div className="flex flex-col md:flex-row gap-6">
             <div className="flex-1 w-full min-h-[300px] flex items-center justify-center bg-[#0b0f19] p-4 rounded-xl border border-slate-800 shadow-lg">
@@ -568,12 +684,20 @@ const MatchReview = () => {
             {/* Detailed Feedback Cards */}
             <div className="flex-1 flex flex-col gap-4">
               <div className="bg-[#0b0f19] p-6 rounded-xl border border-rose-900/50 shadow-lg">
-                <h3 className="text-rose-400 font-bold mb-2">Critic Feedback</h3>
-                <p className="text-slate-300 text-sm">{match.ai_scores.critic?.feedback}</p>
+                <h3 className="text-rose-400 font-bold mb-2">
+                  Critic Feedback
+                </h3>
+                <p className="text-slate-300 text-sm">
+                  {match.ai_scores.critic?.feedback}
+                </p>
               </div>
               <div className="bg-[#0b0f19] p-6 rounded-xl border border-indigo-900/50 shadow-lg">
-                <h3 className="text-indigo-400 font-bold mb-2">Defender Feedback</h3>
-                <p className="text-slate-300 text-sm">{match.ai_scores.defender?.feedback}</p>
+                <h3 className="text-indigo-400 font-bold mb-2">
+                  Defender Feedback
+                </h3>
+                <p className="text-slate-300 text-sm">
+                  {match.ai_scores.defender?.feedback}
+                </p>
               </div>
             </div>
           </div>
@@ -583,18 +707,59 @@ const MatchReview = () => {
           {/* Audience Sentiment (Added Below AI Radar) */}
           <div className="bg-[#0b0f19] p-6 rounded-xl border border-slate-800 shadow-lg mt-8">
             <h2 className="text-2xl font-bold text-center text-slate-200 mb-6 flex items-center justify-center gap-2">
-              <BarChart3 className="h-6 w-6 text-purple-400" /> Audience Sentiment
+              <BarChart3 className="h-6 w-6 text-purple-400" /> Audience
+              Sentiment
             </h2>
-            {((match?.audience_votes_critic || 0) + (match?.audience_votes_defender || 0)) > 0 ? (
+            {(match?.audience_votes_critic || 0) +
+              (match?.audience_votes_defender || 0) >
+            0 ? (
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[{ name: 'Votes', Critic: match?.audience_votes_critic || 0, Defender: match?.audience_votes_defender || 0 }]} margin={{ top: 20, right: 30, left: -20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="name" stroke="#64748b" tick={{ fill: '#94a3b8', fontWeight: 600 }} />
-                    <YAxis allowDecimals={false} stroke="#64748b" tick={{ fill: '#64748b' }} />
-                    <Tooltip cursor={{ fill: '#0f172a' }} contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
-                    <Bar dataKey="Critic" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={60} />
-                    <Bar dataKey="Defender" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={60} />
+                  <BarChart
+                    data={[
+                      {
+                        name: "Votes",
+                        Critic: match?.audience_votes_critic || 0,
+                        Defender: match?.audience_votes_defender || 0,
+                      },
+                    ]}
+                    margin={{ top: 20, right: 30, left: -20, bottom: 5 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="#1e293b"
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#64748b"
+                      tick={{ fill: "#94a3b8", fontWeight: 600 }}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      stroke="#64748b"
+                      tick={{ fill: "#64748b" }}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "#0f172a" }}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        border: "1px solid #1e293b",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Bar
+                      dataKey="Critic"
+                      fill="#f43f5e"
+                      radius={[4, 4, 0, 0]}
+                      barSize={60}
+                    />
+                    <Bar
+                      dataKey="Defender"
+                      fill="#6366f1"
+                      radius={[4, 4, 0, 0]}
+                      barSize={60}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -604,15 +769,15 @@ const MatchReview = () => {
               </div>
             )}
           </div>
-
         </div>
       )}
 
       {/* Footer / Voting (Natural Flow) */}
       <div className="p-6 bg-slate-900 border-t border-slate-800">
         <div className="max-w-4xl mx-auto">
-          {/* DEV MODE: Temporarily allowing players to vote on their own matches for testing purposes. Re-enable before production. */}
-          {match.status === 'pending_votes' && !hasVoted ? (
+          {match.status === "pending_votes" &&
+          !hasVoted &&
+          ![match.critic_id, match.defender_id].includes(currentUser?.id) ? (
             <div>
               <h2 className="text-2xl font-semibold text-slate-100 mb-6 flex items-center gap-2">
                 <Vote className="h-6 w-6 text-purple-400" />
@@ -620,7 +785,8 @@ const MatchReview = () => {
               </h2>
 
               <p className="text-slate-400 mb-6">
-                Who do you think won this debate? Your vote will help determine the winner.
+                Who do you think won this debate? Your vote will help determine
+                the winner.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -629,7 +795,9 @@ const MatchReview = () => {
                   className="p-6 rounded-xl border border-rose-500/40 bg-rose-950/40 hover:border-rose-400 hover:bg-rose-950/60 transition-all text-left group"
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-lg font-semibold text-rose-300">Critic</span>
+                    <span className="text-lg font-semibold text-rose-300">
+                      Critic
+                    </span>
                     <Trophy className="h-5 w-5 text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                   <p className="text-sm text-rose-200 opacity-80">
@@ -642,7 +810,9 @@ const MatchReview = () => {
                   className="p-6 rounded-xl border border-cyan-500/40 bg-cyan-950/40 hover:border-cyan-400 hover:bg-cyan-950/60 transition-all text-left group"
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-lg font-semibold text-cyan-300">Defender</span>
+                    <span className="text-lg font-semibold text-cyan-300">
+                      Defender
+                    </span>
                     <Trophy className="h-5 w-5 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
                   <p className="text-sm text-cyan-200 opacity-80">
@@ -655,7 +825,9 @@ const MatchReview = () => {
             <div className="flex items-center gap-3">
               <Trophy className="h-6 w-6 text-green-400" />
               <div>
-                <h3 className="text-lg font-semibold text-green-300">Vote Submitted</h3>
+                <h3 className="text-lg font-semibold text-green-300">
+                  Vote Submitted
+                </h3>
                 <p className="text-green-200 opacity-80">
                   ✅ Your vote has been recorded.
                 </p>
@@ -665,138 +837,208 @@ const MatchReview = () => {
         </div>
 
         {/* Winner Celebration - Premium Design */}
-        {match.status === 'completed' && (
+        {match.status === "completed" && (
           <div className="relative overflow-hidden">
             {/* Animated Background Gradient */}
-            <div className={`absolute inset-0 ${
-              winner === 'Critic' 
-                ? 'bg-gradient-to-br from-rose-950/90 via-rose-900/50 to-slate-950' 
-                : winner === 'Defender' 
-                  ? 'bg-gradient-to-br from-indigo-950/90 via-indigo-900/50 to-slate-950' 
-                  : 'bg-gradient-to-br from-amber-950/90 via-yellow-900/50 to-slate-950'
-            }`} />
-            
+            <div
+              className={`absolute inset-0 ${
+                winner === "Critic"
+                  ? "bg-gradient-to-br from-rose-950/90 via-rose-900/50 to-slate-950"
+                  : winner === "Defender"
+                    ? "bg-gradient-to-br from-indigo-950/90 via-indigo-900/50 to-slate-950"
+                    : "bg-gradient-to-br from-amber-950/90 via-yellow-900/50 to-slate-950"
+              }`}
+            />
+
             {/* Subtle Animated Glow Orbs */}
-            <div className={`absolute top-0 left-1/4 w-96 h-96 rounded-full blur-3xl animate-pulse ${
-              winner === 'Critic' ? 'bg-rose-500/20' : winner === 'Defender' ? 'bg-indigo-500/20' : 'bg-amber-500/20'
-            }`} style={{ animationDuration: '3s' }} />
-            <div className={`absolute bottom-0 right-1/4 w-80 h-80 rounded-full blur-3xl animate-pulse ${
-              winner === 'Critic' ? 'bg-pink-500/15' : winner === 'Defender' ? 'bg-cyan-500/15' : 'bg-orange-500/15'
-            }`} style={{ animationDuration: '4s', animationDelay: '1s' }} />
-            
+            <div
+              className={`absolute top-0 left-1/4 w-96 h-96 rounded-full blur-3xl animate-pulse ${
+                winner === "Critic"
+                  ? "bg-rose-500/20"
+                  : winner === "Defender"
+                    ? "bg-indigo-500/20"
+                    : "bg-amber-500/20"
+              }`}
+              style={{ animationDuration: "3s" }}
+            />
+            <div
+              className={`absolute bottom-0 right-1/4 w-80 h-80 rounded-full blur-3xl animate-pulse ${
+                winner === "Critic"
+                  ? "bg-pink-500/15"
+                  : winner === "Defender"
+                    ? "bg-cyan-500/15"
+                    : "bg-orange-500/15"
+              }`}
+              style={{ animationDuration: "4s", animationDelay: "1s" }}
+            />
+
             <div className="relative z-10 py-12 px-6">
               <div className="max-w-2xl mx-auto text-center">
-                
                 {/* Premium Trophy SVG */}
                 <div className="relative inline-block mb-6">
                   {/* Outer Glow Ring */}
-                  <div className={`absolute inset-0 rounded-full blur-xl animate-pulse ${
-                    winner === 'Critic' ? 'bg-rose-400/40' : winner === 'Defender' ? 'bg-indigo-400/40' : 'bg-amber-400/40'
-                  }`} style={{ transform: 'scale(1.5)', animationDuration: '2s' }} />
-                  
+                  <div
+                    className={`absolute inset-0 rounded-full blur-xl animate-pulse ${
+                      winner === "Critic"
+                        ? "bg-rose-400/40"
+                        : winner === "Defender"
+                          ? "bg-indigo-400/40"
+                          : "bg-amber-400/40"
+                    }`}
+                    style={{ transform: "scale(1.5)", animationDuration: "2s" }}
+                  />
+
                   {/* Trophy Icon Container */}
-                  <div className={`relative w-24 h-24 rounded-full flex items-center justify-center ${
-                    winner === 'Tie' 
-                      ? 'bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500' 
-                      : winner === 'Critic' 
-                        ? 'bg-gradient-to-br from-rose-400 via-pink-500 to-rose-600' 
-                        : 'bg-gradient-to-br from-indigo-400 via-blue-500 to-indigo-600'
-                  } shadow-2xl`}>
-                    <Trophy className={`w-12 h-12 ${winner === 'Tie' ? 'text-amber-900' : 'text-white'} drop-shadow-lg`} />
+                  <div
+                    className={`relative w-24 h-24 rounded-full flex items-center justify-center ${
+                      winner === "Tie"
+                        ? "bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500"
+                        : winner === "Critic"
+                          ? "bg-gradient-to-br from-rose-400 via-pink-500 to-rose-600"
+                          : "bg-gradient-to-br from-indigo-400 via-blue-500 to-indigo-600"
+                    } shadow-2xl`}
+                  >
+                    <Trophy
+                      className={`w-12 h-12 ${winner === "Tie" ? "text-amber-900" : "text-white"} drop-shadow-lg`}
+                    />
                   </div>
-                  
+
                   {/* Sparkle Decorations */}
-                  <Sparkles className={`absolute -top-2 -right-2 w-6 h-6 animate-bounce ${
-                    winner === 'Critic' ? 'text-rose-300' : winner === 'Defender' ? 'text-indigo-300' : 'text-amber-300'
-                  }`} style={{ animationDuration: '1.5s' }} />
-                  <Sparkles className={`absolute -bottom-1 -left-3 w-5 h-5 animate-bounce ${
-                    winner === 'Critic' ? 'text-pink-300' : winner === 'Defender' ? 'text-cyan-300' : 'text-yellow-300'
-                  }`} style={{ animationDuration: '2s', animationDelay: '0.5s' }} />
+                  <Sparkles
+                    className={`absolute -top-2 -right-2 w-6 h-6 animate-bounce ${
+                      winner === "Critic"
+                        ? "text-rose-300"
+                        : winner === "Defender"
+                          ? "text-indigo-300"
+                          : "text-amber-300"
+                    }`}
+                    style={{ animationDuration: "1.5s" }}
+                  />
+                  <Sparkles
+                    className={`absolute -bottom-1 -left-3 w-5 h-5 animate-bounce ${
+                      winner === "Critic"
+                        ? "text-pink-300"
+                        : winner === "Defender"
+                          ? "text-cyan-300"
+                          : "text-yellow-300"
+                    }`}
+                    style={{ animationDuration: "2s", animationDelay: "0.5s" }}
+                  />
                 </div>
-                
+
                 {/* Winner Title */}
-                <h2 className={`text-4xl md:text-5xl font-black mb-3 tracking-tight ${
-                  winner === 'Critic' 
-                    ? 'bg-gradient-to-r from-rose-300 via-pink-200 to-rose-300 bg-clip-text text-transparent' 
-                    : winner === 'Defender' 
-                      ? 'bg-gradient-to-r from-indigo-300 via-cyan-200 to-indigo-300 bg-clip-text text-transparent' 
-                      : 'bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-300 bg-clip-text text-transparent'
-                }`}>
-                  {winner === 'Tie' ? 'MATCH TIED' : `${winner.toUpperCase()} WINS`}
+                <h2
+                  className={`text-4xl md:text-5xl font-black mb-3 tracking-tight ${
+                    winner === "Critic"
+                      ? "bg-gradient-to-r from-rose-300 via-pink-200 to-rose-300 bg-clip-text text-transparent"
+                      : winner === "Defender"
+                        ? "bg-gradient-to-r from-indigo-300 via-cyan-200 to-indigo-300 bg-clip-text text-transparent"
+                        : "bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-300 bg-clip-text text-transparent"
+                  }`}
+                >
+                  {winner === "Tie"
+                    ? "MATCH TIED"
+                    : `${winner.toUpperCase()} WINS`}
                 </h2>
-                
+
                 {/* Subtitle */}
-                <p className={`text-lg md:text-xl font-medium mb-8 ${
-                  winner === 'Critic' ? 'text-rose-200/80' : winner === 'Defender' ? 'text-indigo-200/80' : 'text-amber-200/80'
-                }`}>
-                  {winner === 'Tie' 
-                    ? `An evenly matched debate • ${final_score_critic} points each` 
-                    : `Decisive victory with ${winner === 'Critic' ? final_score_critic : final_score_defender} points`
-                  }
+                <p
+                  className={`text-lg md:text-xl font-medium mb-8 ${
+                    winner === "Critic"
+                      ? "text-rose-200/80"
+                      : winner === "Defender"
+                        ? "text-indigo-200/80"
+                        : "text-amber-200/80"
+                  }`}
+                >
+                  {winner === "Tie"
+                    ? `An evenly matched debate • ${final_score_critic} points each`
+                    : `Decisive victory with ${winner === "Critic" ? final_score_critic : final_score_defender} points`}
                 </p>
-                
+
                 {/* ELO Change Display - Glassmorphism Card */}
-                <div className={`inline-flex items-center gap-6 px-8 py-5 rounded-2xl backdrop-blur-xl border ${
-                  winner === 'Critic' 
-                    ? 'bg-rose-500/10 border-rose-400/30 shadow-rose-500/20' 
-                    : winner === 'Defender' 
-                      ? 'bg-indigo-500/10 border-indigo-400/30 shadow-indigo-500/20' 
-                      : 'bg-amber-500/10 border-amber-400/30 shadow-amber-500/20'
-                } shadow-2xl`}>
-                  
+                <div
+                  className={`inline-flex items-center gap-6 px-8 py-5 rounded-2xl backdrop-blur-xl border ${
+                    winner === "Critic"
+                      ? "bg-rose-500/10 border-rose-400/30 shadow-rose-500/20"
+                      : winner === "Defender"
+                        ? "bg-indigo-500/10 border-indigo-400/30 shadow-indigo-500/20"
+                        : "bg-amber-500/10 border-amber-400/30 shadow-amber-500/20"
+                  } shadow-2xl`}
+                >
                   {/* Critic ELO */}
                   <div className="text-center">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Critic</p>
-                    <p className={`text-2xl font-bold ${
-                      (match.elo_change_critic || 0) > 0 
-                        ? 'text-emerald-400' 
-                        : (match.elo_change_critic || 0) < 0 
-                          ? 'text-red-400' 
-                          : 'text-slate-300'
-                    }`}>
-                      {(match.elo_change_critic || 0) > 0 ? '+' : ''}{match.elo_change_critic || 0}
-                      <span className="text-sm font-medium text-slate-400 ml-1">ELO</span>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Critic
+                    </p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        (match.elo_change_critic || 0) > 0
+                          ? "text-emerald-400"
+                          : (match.elo_change_critic || 0) < 0
+                            ? "text-red-400"
+                            : "text-slate-300"
+                      }`}
+                    >
+                      {(match.elo_change_critic || 0) > 0 ? "+" : ""}
+                      {match.elo_change_critic || 0}
+                      <span className="text-sm font-medium text-slate-400 ml-1">
+                        ELO
+                      </span>
                     </p>
                   </div>
-                  
+
                   {/* Divider */}
-                  <div className={`w-px h-12 ${
-                    winner === 'Critic' ? 'bg-rose-400/30' : winner === 'Defender' ? 'bg-indigo-400/30' : 'bg-amber-400/30'
-                  }`} />
-                  
+                  <div
+                    className={`w-px h-12 ${
+                      winner === "Critic"
+                        ? "bg-rose-400/30"
+                        : winner === "Defender"
+                          ? "bg-indigo-400/30"
+                          : "bg-amber-400/30"
+                    }`}
+                  />
+
                   {/* Defender ELO */}
                   <div className="text-center">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Defender</p>
-                    <p className={`text-2xl font-bold ${
-                      (match.elo_change_defender || 0) > 0 
-                        ? 'text-emerald-400' 
-                        : (match.elo_change_defender || 0) < 0 
-                          ? 'text-red-400' 
-                          : 'text-slate-300'
-                    }`}>
-                      {(match.elo_change_defender || 0) > 0 ? '+' : ''}{match.elo_change_defender || 0}
-                      <span className="text-sm font-medium text-slate-400 ml-1">ELO</span>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Defender
+                    </p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        (match.elo_change_defender || 0) > 0
+                          ? "text-emerald-400"
+                          : (match.elo_change_defender || 0) < 0
+                            ? "text-red-400"
+                            : "text-slate-300"
+                      }`}
+                    >
+                      {(match.elo_change_defender || 0) > 0 ? "+" : ""}
+                      {match.elo_change_defender || 0}
+                      <span className="text-sm font-medium text-slate-400 ml-1">
+                        ELO
+                      </span>
                     </p>
                   </div>
                 </div>
-                
+
                 {/* Winner Badge - Only show if not a tie */}
-                {winner !== 'Tie' && (
+                {winner !== "Tie" && (
                   <div className="mt-6">
-                    <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${
-                      winner === 'Critic' 
-                        ? 'bg-rose-500/20 text-rose-300 border border-rose-400/30' 
-                        : 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/30'
-                    }`}>
+                    <span
+                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold ${
+                        winner === "Critic"
+                          ? "bg-rose-500/20 text-rose-300 border border-rose-400/30"
+                          : "bg-indigo-500/20 text-indigo-300 border border-indigo-400/30"
+                      }`}
+                    >
                       <Target className="w-4 h-4" />
-                      {winner === 'Critic' 
-                        ? `Critic dominated by ${final_score_critic - final_score_defender} points` 
-                        : `Defender prevailed by ${final_score_defender - final_score_critic} points`
-                      }
+                      {winner === "Critic"
+                        ? `Critic dominated by ${final_score_critic - final_score_defender} points`
+                        : `Defender prevailed by ${final_score_defender - final_score_critic} points`}
                     </span>
                   </div>
                 )}
-                
               </div>
             </div>
           </div>
