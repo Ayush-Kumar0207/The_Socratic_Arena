@@ -25,6 +25,7 @@ export const createRealtimeCoordinator = async ({ io, redisUrl = process.env.RED
       setSocketRoom: async () => {},
       getSocketRoom: async () => null,
       clearSocketRoom: async () => {},
+      ping: async () => true,
       health: () => ({ mode: 'single-instance', connected: false }),
     };
   }
@@ -125,6 +126,7 @@ export const createRealtimeCoordinator = async ({ io, redisUrl = process.env.RED
     },
     getSocketRoom: async socketId => (socketId ? state.get(socketRoomKey(socketId)) : null),
     clearSocketRoom: async socketId => { if (socketId) await state.del(socketRoomKey(socketId)); },
+    ping: async () => (await state.ping()) === 'PONG',
     health: () => ({ mode: 'redis-distributed', connected: state.isReady, instanceId }),
   };
 };

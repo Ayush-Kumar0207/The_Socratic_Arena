@@ -19,6 +19,8 @@ import {
 } from '../lib/platformWorkflows.js';
 import { verifyEvidence } from '../lib/evidenceVerifier.js';
 import { createRateLimit } from '../lib/rateLimit.js';
+import { JUDGE_PANEL, runBlindJudgePanel } from '../lib/judgePanel.js';
+import { buildVerifiedTournamentResult } from '../lib/tournamentIntegrity.js';
 
 const SCENARIO_FALLBACKS = [
   { scenario_key: 'sales-objection', title: 'Enterprise sales objection', description: 'Defend value and handle a skeptical procurement lead.', category: 'Sales', difficulty: 'Intermediate', opening_prompt: 'Your proposal is twice the price of the incumbent. Why should we take that risk?' },
@@ -119,6 +121,75 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     const { data, error } = await supabase.from('credentials').upsert(credential, { onConflict: 'user_id,credential_key' }).select().single();
     if (error) throw error;
     return data;
+  };
+
+  const judgeTeamDebate = async (debate) => {
+    const turns = await safeRows(supabase.from('team_debate_turns').select('*').eq('debate_id', debate.id).order('turn_number'));
+    const requiredTurns = Number(debate.max_rounds) * 4;
+    if (turns.length !== requiredTurns) throw Object.assign(new Error(`A complete 2v2 transcript requires ${requiredTurns} turns`), { statusCode: 409 });
+
+    const { verdicts, scores, winningSide } = await runBlindJudgePanel({
+      topic: debate.topic,
+      transcript: turns,
+      generate: generateWithRetry,
+      advancedAi,
+      allowFallback: false,
+      sideKeys: ['affirmative', 'negative'],
+      sideLabels: ['the team supporting the motion', 'the team opposing the motion'],
+      version: 'arena-panel-1.1',
+    });
+
+    const auditRows = verdicts.map((verdict, index) => ({
+      debate_id: debate.id,
+      judge_version: 'arena-panel-1.1',
+      judge_role: verdict.judge || JUDGE_PANEL[index].role,
+      verdict,
+      confidence: Number(verdict.confidence) || null,
+    }));
+    const { error: auditError } = await supabase
+      .from('team_judge_evaluations')
+      .upsert(auditRows, { onConflict: 'debate_id,judge_role' });
+    if (auditError) throw auditError;
+
+    const finalizedAt = new Date().toISOString();
+    const { data: completed, error: completionError } = await supabase.from('team_debates').update({
+      status: 'completed',
+      winning_side: winningSide,
+      scores,
+      judge_version: 'arena-panel-1.1',
+      judging_error: null,
+      completed_at: finalizedAt,
+      result_finalized_at: finalizedAt,
+    }).eq('id', debate.id).eq('status', 'judging').select().single();
+    if (completionError || !completed) throw completionError || new Error('Team result was already finalized');
+
+    const credentialWarnings = [];
+    if (winningSide !== 'draw') {
+      const winners = await safeRows(supabase.from('team_debate_members').select('user_id').eq('debate_id', debate.id).eq('side', winningSide));
+      const outcomes = await Promise.allSettled(winners.map(winner => issueCredential({
+        userId: winner.user_id,
+        key: `team-debate:${debate.id}:winner`,
+        title: 'Verified 2v2 Team Debate Winner',
+        level: 'winner',
+        type: 'team_competition',
+        evidence: {
+          debate_id: debate.id,
+          judge_version: 'arena-panel-1.1',
+          methodology: scores.result_metadata?.methodology,
+          finalized_at: finalizedAt,
+        },
+      })));
+      outcomes.forEach((outcome, index) => {
+        if (outcome.status === 'rejected') credentialWarnings.push(`Credential issuance pending for ${winners[index].user_id}`);
+      });
+    }
+    return { debate: completed, scores, winningSide, credentialWarnings };
+  };
+
+  const markTeamJudgingFailed = async (debateId, error) => {
+    const publicError = cleanText(error?.message || 'The judge panel is temporarily unavailable', 240);
+    await supabase.from('team_debates').update({ status: 'judging_failed', judging_error: publicError }).eq('id', debateId).eq('status', 'judging');
+    return publicError;
   };
 
   const reviewAppeal = async (appeal, match) => {
@@ -365,9 +436,19 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     const fixture = (await safeRows(supabase.from('tournament_fixtures').select('*').eq('id', req.params.fixtureId).eq('tournament_id', req.params.tournamentId).limit(1)))[0];
     if (!tournament || !fixture) return res.status(404).json({ success: false, message: 'Fixture not found' });
     if (tournament.owner_id !== req.user.id && !(await isAdmin(req.user.id))) return res.status(403).json({ success: false, message: 'Only the organizer can certify fixture results' });
-    const winnerId = req.body.winner_id;
-    if (![fixture.player1_id, fixture.player2_id].includes(winnerId)) return res.status(400).json({ success: false, message: 'Winner must be one of the seeded competitors' });
-    const { data: settled, error } = await supabase.from('tournament_fixtures').update({ winner_id: winnerId, score_player1: Number(req.body.score_player1) || 0, score_player2: Number(req.body.score_player2) || 0, match_id: isUuid(req.body.match_id) ? req.body.match_id : null, status: 'completed', completed_at: new Date().toISOString() }).eq('id', fixture.id).in('status', ['ready', 'active']).select().single();
+    if (!isUuid(req.body.match_id)) return res.status(400).json({ success: false, message: 'A completed Socratic match ID is required for automatic verification' });
+    const { data: match, error: matchError } = await supabase.from('matches')
+      .select('id,status,critic_id,defender_id,winner_id,final_score_critic,final_score_defender,ai_scores')
+      .eq('id', req.body.match_id)
+      .single();
+    if (matchError || !match) return res.status(404).json({ success: false, message: 'Linked match not found' });
+    let verifiedResult;
+    try {
+      verifiedResult = buildVerifiedTournamentResult({ fixture, match, submittedWinnerId: req.body.winner_id });
+    } catch (verificationError) {
+      return res.status(verificationError.statusCode || 409).json({ success: false, message: verificationError.message });
+    }
+    const { data: settled, error } = await supabase.from('tournament_fixtures').update(verifiedResult).eq('id', fixture.id).in('status', ['ready', 'active']).select().single();
     if (error || !settled) return res.status(409).json({ success: false, message: 'Fixture is not ready or was already completed' });
     await advanceTournamentWinner(tournament, settled);
     return res.json({ success: true, fixture: settled });
@@ -630,20 +711,42 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     if (error) return res.status(409).json({ success: false, message: 'This turn was already submitted' });
     const next = nextTeamTurn(debate);
     if (next.completed) {
-      const turns = [...await safeRows(supabase.from('team_debate_turns').select('*').eq('debate_id', debate.id).order('turn_number')), turn].filter((value, index, array) => array.findIndex(item => item.id === value.id) === index);
-      const affirmative = deterministicPracticeScore(turns.filter(item => item.side === 'affirmative').map(item => ({ role: 'user', text: item.text })));
-      const negative = deterministicPracticeScore(turns.filter(item => item.side === 'negative').map(item => ({ role: 'user', text: item.text })));
-      const winningSide = affirmative.overall === negative.overall ? 'draw' : affirmative.overall > negative.overall ? 'affirmative' : 'negative';
-      const scores = { affirmative, negative, methodology: '11-dimension team aggregate' };
-      await supabase.from('team_debates').update({ status: 'completed', winning_side: winningSide, scores, completed_at: new Date().toISOString() }).eq('id', debate.id);
-      if (winningSide !== 'draw') {
-        const winners = await safeRows(supabase.from('team_debate_members').select('user_id').eq('debate_id', debate.id).eq('side', winningSide));
-        await Promise.all(winners.map(winner => issueCredential({ userId: winner.user_id, key: `team-debate:${debate.id}:winner`, title: 'Verified 2v2 Team Debate Winner', level: 'winner', type: 'team_competition', evidence: { debate_id: debate.id, scores } })));
+      const { data: judging, error: claimError } = await supabase.from('team_debates').update({
+        status: 'judging',
+        judging_started_at: new Date().toISOString(),
+        judging_error: null,
+      }).eq('id', debate.id).eq('status', 'active').eq('turn_number', debate.turn_number).select().single();
+      if (claimError || !judging) return res.status(409).json({ success: false, message: 'The final turn is already being judged' });
+      try {
+        const result = await judgeTeamDebate(judging);
+        return res.status(201).json({ success: true, turn, completed: true, winning_side: result.winningSide, scores: result.scores, credential_warnings: result.credentialWarnings });
+      } catch (judgeError) {
+        const judgingError = await markTeamJudgingFailed(debate.id, judgeError);
+        return res.status(judgeError.statusCode || 503).json({ success: false, turn, completed: false, judging_failed: true, message: judgingError });
       }
-      return res.status(201).json({ success: true, turn, completed: true, winning_side: winningSide, scores });
     }
     await supabase.from('team_debates').update({ active_side: next.side, active_position: next.position, turn_number: next.turnNumber }).eq('id', debate.id).eq('turn_number', debate.turn_number);
     return res.status(201).json({ success: true, turn, completed: false, next });
+  });
+
+  router.post('/team-debates/:debateId/judge', createRateLimit({ name: 'team-judge-retry', max: 3, windowMs: 10 * 60_000 }), async (req, res) => {
+    const debate = (await safeRows(supabase.from('team_debates').select('*').eq('id', req.params.debateId).limit(1)))[0];
+    const member = (await safeRows(supabase.from('team_debate_members').select('user_id').eq('debate_id', req.params.debateId).eq('user_id', req.user.id).limit(1)))[0];
+    if (!debate || !member) return res.status(404).json({ success: false, message: 'Team arena not found' });
+    if (debate.status !== 'judging_failed') return res.status(409).json({ success: false, message: 'Only a failed panel judgment can be retried' });
+    const { data: judging, error: claimError } = await supabase.from('team_debates').update({
+      status: 'judging',
+      judging_started_at: new Date().toISOString(),
+      judging_error: null,
+    }).eq('id', debate.id).eq('status', 'judging_failed').select().single();
+    if (claimError || !judging) return res.status(409).json({ success: false, message: 'Another member already restarted the judge panel' });
+    try {
+      const result = await judgeTeamDebate(judging);
+      return res.json({ success: true, completed: true, debate: result.debate, winning_side: result.winningSide, scores: result.scores, credential_warnings: result.credentialWarnings });
+    } catch (judgeError) {
+      const judgingError = await markTeamJudgingFailed(debate.id, judgeError);
+      return res.status(judgeError.statusCode || 503).json({ success: false, judging_failed: true, message: judgingError });
+    }
   });
 
   return router;

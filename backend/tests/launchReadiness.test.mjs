@@ -13,6 +13,8 @@ import {
 } from '../lib/platformWorkflows.js';
 import { assertPublicSourceUrl, extractEvidenceClaims, extractEvidenceUrls, verifyEvidence } from '../lib/evidenceVerifier.js';
 import { clearRateLimitsForTest, createRateLimit } from '../lib/rateLimit.js';
+import { JUDGE_PANEL, runBlindJudgePanel } from '../lib/judgePanel.js';
+import { buildVerifiedTournamentResult } from '../lib/tournamentIntegrity.js';
 
 test('cohort percentile uses the observed distribution rather than a score formula', () => {
   assert.deepEqual(computeCohortPercentile(70, [50, 60, 70, 80]), { percentile: 63, cohortSize: 4 });
@@ -65,17 +67,83 @@ test('evidence verification extracts claims, retrieves cited text, and blocks SS
   assert.equal(report.risk, 'low');
 });
 
-test('rate limiter separates keys and returns Retry-After', () => {
+test('rate limiter separates keys and returns Retry-After', async () => {
   clearRateLimitsForTest();
   const middleware = createRateLimit({ name: 'test', max: 1, windowMs: 60_000, key: req => req.user.id });
   const makeResponse = () => ({ statusCode: 200, headers: {}, body: null, set(name, value) { this.headers[name] = value; }, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
   let nextCount = 0;
-  middleware({ user: { id: 'a' } }, makeResponse(), () => { nextCount += 1; });
-  const blocked = makeResponse(); middleware({ user: { id: 'a' } }, blocked, () => { nextCount += 1; });
-  middleware({ user: { id: 'b' } }, makeResponse(), () => { nextCount += 1; });
+  await middleware({ user: { id: 'a' } }, makeResponse(), () => { nextCount += 1; });
+  const blocked = makeResponse(); await middleware({ user: { id: 'a' } }, blocked, () => { nextCount += 1; });
+  await middleware({ user: { id: 'b' } }, makeResponse(), () => { nextCount += 1; });
   assert.equal(nextCount, 2);
   assert.equal(blocked.statusCode, 429);
   assert.ok(blocked.headers['Retry-After']);
+});
+
+test('rate limiter accepts a distributed atomic consumer', async () => {
+  const calls = [];
+  const consume = async options => {
+    calls.push(options);
+    return { allowed: calls.length === 1, count: calls.length, retryAfterMs: 2_500, mode: 'redis-distributed' };
+  };
+  const middleware = createRateLimit({ name: 'global', max: 1, consume });
+  const makeResponse = () => ({ statusCode: 200, headers: {}, set(name, value) { this.headers[name] = value; }, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
+  let nextCount = 0;
+  await middleware({ ip: '203.0.113.1' }, makeResponse(), () => { nextCount += 1; });
+  const blocked = makeResponse();
+  await middleware({ ip: '203.0.113.1' }, blocked, () => { nextCount += 1; });
+  assert.equal(nextCount, 1);
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.headers['X-RateLimit-Mode'], 'redis-distributed');
+  assert.equal(calls[0].bucketKey, 'global:203.0.113.1');
+});
+
+test('tournament advancement is derived only from a canonical completed match', () => {
+  const fixture = { player1_id: 'player-a', player2_id: 'player-b' };
+  const match = {
+    id: 'match-1', status: 'completed', critic_id: 'player-b', defender_id: 'player-a', winner_id: 'player-b',
+    final_score_critic: 7.5, final_score_defender: 6.25, ai_scores: {},
+  };
+  const result = buildVerifiedTournamentResult({ fixture, match, verifiedAt: '2026-08-12T00:00:00.000Z' });
+  assert.equal(result.winner_id, 'player-b');
+  assert.equal(result.score_player1, 6.25);
+  assert.equal(result.score_player2, 7.5);
+  assert.equal(result.result_source, 'verified_match');
+  assert.throws(() => buildVerifiedTournamentResult({ fixture, match, submittedWinnerId: 'player-a' }), /conflicts/);
+  assert.throws(() => buildVerifiedTournamentResult({ fixture, match: { ...match, defender_id: 'outsider' } }), /participants/);
+  assert.throws(() => buildVerifiedTournamentResult({ fixture, match: { ...match, status: 'pending_votes' } }), /finalized/);
+});
+
+test('competitive 2v2 requires and aggregates three blind independent judges', async () => {
+  const seenPrompts = [];
+  const generate = async (prompt) => {
+    seenPrompts.push(prompt);
+    const index = seenPrompts.length;
+    const side = score => Object.fromEntries([
+      'logic', 'evidence', 'rebuttal', 'clarity', 'conciseness', 'persuasion',
+      'listening', 'calibration', 'humility', 'sourceReliability', 'emotionalControl',
+    ].map(metric => [metric, score]));
+    return {
+      judge: JUDGE_PANEL[index - 1].role,
+      affirmative: { ...side(8 + (index === 2 ? 1 : 0)), feedback: 'Specific affirmative feedback.' },
+      negative: { ...side(6), feedback: 'Specific negative feedback.' },
+      confidence: 0.9,
+      rationale: 'Affirmative directly answered the strongest objection.',
+    };
+  };
+  const result = await runBlindJudgePanel({
+    topic: 'Test motion',
+    transcript: [{ side: 'affirmative', text: 'Claim with warrant.' }, { side: 'negative', text: 'Rebuttal.' }],
+    generate,
+    sideKeys: ['affirmative', 'negative'],
+    sideLabels: ['supporting', 'opposing'],
+  });
+  assert.equal(seenPrompts.length, 3);
+  assert.ok(seenPrompts.every(prompt => /identities are hidden/i.test(prompt)));
+  assert.equal(result.scores.result_metadata.judge_count, 3);
+  assert.equal(result.scores.result_metadata.methodology, 'blind-three-judge-median-panel');
+  assert.equal(result.winningSide, 'affirmative');
+  await assert.rejects(() => runBlindJudgePanel({ advancedAi: false, allowFallback: false }), /not configured/);
 });
 
 test('launch migration codifies core RLS and service-only atomic voting', async () => {
@@ -86,6 +154,14 @@ test('launch migration codifies core RLS and service-only atomic voting', async 
   assert.match(migration, /create or replace function public\.cast_match_vote_service/i);
   assert.match(migration, /revoke all on function public\.cast_match_vote_service[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /revoke insert, update, delete on public\.matches, public\.votes from anon, authenticated/i);
+});
+
+test('final integrity migration makes team judgments auditable and match linkage unique', async () => {
+  const migration = await readFile(new URL('../migrations/006_final_integrity.sql', import.meta.url), 'utf8');
+  assert.match(migration, /create unique index[\s\S]*tournament_fixture_verified_match/i);
+  assert.match(migration, /status in \('waiting','active','judging','judging_failed','completed','cancelled'\)/i);
+  assert.match(migration, /create table if not exists public\.team_judge_evaluations/i);
+  assert.match(migration, /revoke all on public\.team_judge_evaluations from anon, authenticated/i);
 });
 
 test('judge calibration dataset has human labels and fairness pairs', async () => {

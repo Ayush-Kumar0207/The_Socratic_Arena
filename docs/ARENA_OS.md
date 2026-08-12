@@ -51,9 +51,10 @@ Run the existing `schema.sql`, then apply migrations in numeric order. Existing 
 ```text
 backend/migrations/004_arena_os.sql
 backend/migrations/005_launch_readiness.sql
+backend/migrations/006_final_integrity.sql
 ```
 
-Migration `005` adds the protected workflow tables, core RLS policies, service-only atomic voting RPC, real-cohort percentiles, moderation enforcement/appeals, benchmark history, and persistent 2v2 state. Existing live debates and result screens remain backward-compatible while it is applied.
+Migration `005` adds the protected workflow tables, core RLS policies, service-only atomic voting RPC, real-cohort percentiles, moderation enforcement/appeals, benchmark history, and persistent 2v2 state. Migration `006` makes tournament advancement depend on a canonical completed match, prevents one match from certifying multiple fixtures, and stores all three blind 2v2 judge verdicts. Existing live debates and result screens remain backward-compatible while they are applied in order.
 
 ## API surface
 
@@ -87,7 +88,10 @@ The built-in workflows now cover classroom join/assign/submit/grade/export, retr
 
 ## Launch verification
 
-- `npm test` in `backend` validates percentile, brackets, team turn order, signatures, evidence retrieval/SSRF protection, rate limits, RLS migration content, and calibration data.
+- `npm test` in `backend` validates percentile, match-verified brackets, blind team judging, signatures, evidence retrieval/SSRF protection, distributed-rate-limit behavior, RLS migration content, and calibration data.
 - `npm run benchmark:judge:dry` validates the human-labelled benchmark; run `npm run benchmark:judge` with production credentials to execute the blind three-judge panel and persist measured parity results.
+- `npm run smoke:hosted` checks the deployed Vercel frontend and Render `/ready` probe, which in turn verifies live Supabase and Redis dependencies without invoking Gemini. GitHub Actions runs it daily.
+
+The bundled 12-case calibration set is a reproducible regression gate, not scientific proof of population-wide fairness. Broader fairness claims require larger, independently reviewed datasets spanning more languages, demographics, topics, and speaking conditions.
 - `npm run test:e2e` in `frontend` runs the two-browser reconnect/judging/vote/appeal gate plus the teacher/student classroom lifecycle.
 - Set `REDIS_URL` in multi-instance deployments. Socket.IO uses its Redis adapter plus durable room state, distributed matchmaking, presence, and timer leases. Load balancers should prefer WebSocket and retain sticky sessions when falling back to long polling.

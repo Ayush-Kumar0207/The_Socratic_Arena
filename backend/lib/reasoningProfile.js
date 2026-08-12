@@ -64,8 +64,12 @@ export const pickDrill = (metrics = {}) => {
   return DRILL_CATALOG.find(drill => drill.metric === weakest) || DRILL_CATALOG[0];
 };
 
-export const aggregateJudgeVerdicts = (verdicts = [], version = 'arena-panel-1.0') => {
-  const valid = verdicts.filter(verdict => verdict?.critic && verdict?.defender);
+export const aggregateBlindPanelVerdicts = (
+  verdicts = [],
+  { version = 'arena-panel-1.0', sideKeys = ['critic', 'defender'] } = {},
+) => {
+  const [firstSide, secondSide] = sideKeys;
+  const valid = verdicts.filter(verdict => verdict?.[firstSide] && verdict?.[secondSide]);
   if (!valid.length) return null;
 
   const aggregateSide = (side) => {
@@ -84,24 +88,24 @@ export const aggregateJudgeVerdicts = (verdicts = [], version = 'arena-panel-1.0
     };
   };
 
-  const critic = aggregateSide('critic');
-  const defender = aggregateSide('defender');
+  const firstScores = aggregateSide(firstSide);
+  const secondScores = aggregateSide(secondSide);
   const judgeMargins = valid.map((verdict) => {
-    const criticTotal = mean(REASONING_METRICS.map(metric => readMetric(verdict.critic, metric)));
-    const defenderTotal = mean(REASONING_METRICS.map(metric => readMetric(verdict.defender, metric)));
-    return criticTotal - defenderTotal;
+    const firstTotal = mean(REASONING_METRICS.map(metric => readMetric(verdict[firstSide], metric)));
+    const secondTotal = mean(REASONING_METRICS.map(metric => readMetric(verdict[secondSide], metric)));
+    return firstTotal - secondTotal;
   });
   const direction = Math.sign(mean(judgeMargins));
   const agreementCount = judgeMargins.filter(margin => Math.sign(margin) === direction || Math.abs(margin) < 0.15).length;
   const rawUncertainty = mean([
-    ...REASONING_METRICS.map(metric => deviation(valid.map(v => readMetric(v.critic, metric)))),
-    ...REASONING_METRICS.map(metric => deviation(valid.map(v => readMetric(v.defender, metric)))),
+    ...REASONING_METRICS.map(metric => deviation(valid.map(v => readMetric(v[firstSide], metric)))),
+    ...REASONING_METRICS.map(metric => deviation(valid.map(v => readMetric(v[secondSide], metric)))),
   ]);
   const flaggedClaims = valid.flatMap(v => Array.isArray(v.flagged_claims) ? v.flagged_claims : []).slice(0, 8);
 
   return {
-    critic,
-    defender,
+    [firstSide]: firstScores,
+    [secondSide]: secondScores,
     overall_summary: valid.map(v => v.overall_summary).find(Boolean) || 'A closely examined contest of reasoning and evidence.',
     result_metadata: {
       judge_version: version,
@@ -124,6 +128,10 @@ export const aggregateJudgeVerdicts = (verdicts = [], version = 'arena-panel-1.0
     })),
   };
 };
+
+export const aggregateJudgeVerdicts = (verdicts = [], version = 'arena-panel-1.0') => (
+  aggregateBlindPanelVerdicts(verdicts, { version, sideKeys: ['critic', 'defender'] })
+);
 
 const sideScoresFromMatch = (match, userId) => {
   if (!match?.ai_scores) return null;

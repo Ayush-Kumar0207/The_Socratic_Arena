@@ -122,10 +122,11 @@ import createProductRoutes from './routes/productRoutes.js';
 // Import Supabase client for database operations
 import { supabase } from './lib/supabaseClient.js';
 import { analyzeCognitiveTurn, extractCognitiveInsights } from './lib/cognitiveEngine.js';
-import { aggregateJudgeVerdicts, computeReasoningProfile } from './lib/reasoningProfile.js';
+import { computeReasoningProfile } from './lib/reasoningProfile.js';
 import { buildDebateHighlights, computeCohortPercentile } from './lib/platformWorkflows.js';
+import { JUDGE_PANEL, runBlindJudgePanel } from './lib/judgePanel.js';
 import { createRealtimeCoordinator } from './lib/realtimeState.js';
-import { createRateLimit } from './lib/rateLimit.js';
+import { createRateLimit, ensureRateLimitReady, rateLimitHealth } from './lib/rateLimit.js';
 import {
   metricsHandler,
   observeHttpRequests,
@@ -150,22 +151,6 @@ if (!supabase) {
  * AI Debate Evaluation Engine
  * Evaluates debate transcripts using Gemini AI and scores participants
  */
-const JUDGE_PANEL = [
-  { role: 'Logic judge', lens: 'valid inference, contradictions, claim construction, direct rebuttal, and charitable interpretation' },
-  { role: 'Evidence judge', lens: 'factual support, source reliability, confidence calibration, uncertainty, and unsupported empirical claims' },
-  { role: 'Communication judge', lens: 'clarity, conciseness, listening, persuasion without manipulation, humility, and emotional control' },
-];
-
-const localJudgeVerdict = (judge, index) => ({
-  judge: judge.role,
-  critic: { logic: 6, evidence: 6, rebuttal: 6, clarity: 6, conciseness: 6, persuasion: 6, listening: 6, calibration: 6, humility: 6, sourceReliability: 6, emotionalControl: 6, feedback: 'Panel scoring requires Gemini; this neutral result preserves the match workflow.' },
-  defender: { logic: 6, evidence: 6, rebuttal: 6, clarity: 6, conciseness: 6, persuasion: 6, listening: 6, calibration: 6, humility: 6, sourceReliability: 6, emotionalControl: 6, feedback: 'Panel scoring requires Gemini; this neutral result preserves the match workflow.' },
-  overall_summary: 'The debate concluded and is awaiting a fully configured judge panel.',
-  confidence: 0.45 + index * 0.01,
-  rationale: 'Neutral offline fallback.',
-  flagged_claims: [],
-});
-
 async function refreshReasoningProfiles(matchId) {
   try {
     const { data: match, error } = await supabase.from('matches').select('critic_id, defender_id').eq('id', matchId).single();
@@ -195,44 +180,17 @@ async function refreshReasoningProfiles(matchId) {
 
 async function evaluateDebate(transcript, matchId) {
   try {
-    // 1. Format transcript into a readable string (Truncated to last 40 messages)
-    const windowContext = transcript.slice(-40);
-    const debateText = windowContext.map(m => `${m.speaker}: ${m.text}`).join('\n');
-
-    // 2. Blind, independent panel. Each judge receives the same transcript but a
-    // different rubric lens; median aggregation reduces persona and order bias.
-    const panelVerdicts = ENABLE_ADVANCED_AI
-      ? (await Promise.all(JUDGE_PANEL.map(async (judge, index) => {
-          const prompt = `You are the ${judge.role} on a blind debate panel. Player identities are hidden. Judge only the transcript and do not reward aggression, accent, vocabulary, ideology, or verbosity. Focus on ${judge.lens}. Treat factual claims as unverified unless the speaker provides a checkable source. Score both sides independently from 1-10.
-
-Return ONLY JSON in this exact structure:
-{
-  "judge": "${judge.role}",
-  "critic": { "logic": 1, "evidence": 1, "rebuttal": 1, "clarity": 1, "conciseness": 1, "persuasion": 1, "listening": 1, "calibration": 1, "humility": 1, "sourceReliability": 1, "emotionalControl": 1, "feedback": "two concrete sentences" },
-  "defender": { "logic": 1, "evidence": 1, "rebuttal": 1, "clarity": 1, "conciseness": 1, "persuasion": 1, "listening": 1, "calibration": 1, "humility": 1, "sourceReliability": 1, "emotionalControl": 1, "feedback": "two concrete sentences" },
-  "overall_summary": "one sentence",
-  "confidence": 0.0,
-  "rationale": "one concise panel note",
-  "flagged_claims": [{ "speaker": "critic or defender", "claim": "claim requiring verification", "reason": "why" }]
-}
-
-Transcript, in original speaking order:
-${debateText}`;
-          try {
-            return await generateWithRetry(prompt, 3, true);
-          } catch (error) {
-            console.warn(`[Judge Panel] ${judge.role} unavailable:`, error.message);
-            return localJudgeVerdict(judge, index);
-          }
-        })))
-      : JUDGE_PANEL.map(localJudgeVerdict);
-
-    const aiResponse = aggregateJudgeVerdicts(panelVerdicts, 'arena-panel-1.0') || {
-      critic: localJudgeVerdict(JUDGE_PANEL[0], 0).critic,
-      defender: localJudgeVerdict(JUDGE_PANEL[0], 0).defender,
-      overall_summary: 'Debate concluded.',
-      result_metadata: { judge_version: 'offline-fallback', judge_count: 0, agreement: '0/0', uncertainty: 2.5, confidence: 35, appeals_enabled: true },
-    };
+    // Ranked 1v1 and competitive 2v2 share this exact blind, independent,
+    // three-lens judging implementation and median aggregation.
+    const { verdicts: panelVerdicts, scores: aiResponse } = await runBlindJudgePanel({
+      transcript,
+      generate: generateWithRetry,
+      advancedAi: ENABLE_ADVANCED_AI,
+      allowFallback: true,
+      sideKeys: ['critic', 'defender'],
+      sideLabels: ['the critic position', 'the defender position'],
+      version: 'arena-panel-1.1',
+    });
 
     try {
       const scoresOnly = aiResponse;
@@ -255,7 +213,7 @@ ${debateText}`;
       try {
         const rows = panelVerdicts.map((verdict, index) => ({
           match_id: matchId,
-          judge_version: 'arena-panel-1.0',
+          judge_version: 'arena-panel-1.1',
           judge_role: verdict.judge || JUDGE_PANEL[index]?.role || `Judge ${index + 1}`,
           verdict,
           confidence: Number(verdict.confidence) || null,
@@ -826,7 +784,36 @@ app.get('/health', (req, res) => {
     appVersion: APP_VERSION,
     uptimeSeconds: Math.round(process.uptime()),
     realtime: realtimeCoordinator?.health?.() || { mode: 'initializing', connected: false },
+    rateLimit: rateLimitHealth(),
   });
+});
+
+let readinessCache = { checkedAt: 0, response: null };
+app.get('/ready', async (_req, res) => {
+  const now = Date.now();
+  if (!readinessCache.response || now - readinessCache.checkedAt > 5_000) {
+    const redisRequired = Boolean(process.env.REDIS_URL);
+    const [rateLimitReady, realtimeReady, databaseResult] = await Promise.all([
+      ensureRateLimitReady(),
+      realtimeCoordinator?.ping?.().catch(() => false) ?? Promise.resolve(!redisRequired),
+      supabase.from('judge_benchmark_runs').select('id', { head: true, count: 'exact' }).limit(1),
+    ]);
+    const components = {
+      supabase: { ready: !databaseResult.error },
+      redisRealtime: { required: redisRequired, ready: redisRequired ? Boolean(realtimeReady) : true },
+      redisRateLimit: { required: redisRequired, ready: redisRequired ? Boolean(rateLimitReady) : true },
+    };
+    readinessCache = {
+      checkedAt: now,
+      response: {
+        success: Object.values(components).every(component => component.ready),
+        appVersion: APP_VERSION,
+        timestamp: new Date().toISOString(),
+        components,
+      },
+    };
+  }
+  return res.status(readinessCache.response.success ? 200 : 503).json(readinessCache.response);
 });
 
 /**
