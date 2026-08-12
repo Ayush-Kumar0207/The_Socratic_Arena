@@ -126,6 +126,17 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 
 ## ✨ Features
 
+### 🧠 Arena OS — Competitive Reasoning Network
+- **Blind multi-judge panel** — independent logic, evidence, and communication judges with median aggregation, agreement, confidence, uncertainty, factual-claim flags, and versioned audit records.
+- **Longitudinal Reasoning Profile** — tracks 11 skills and prescribes a focused daily drill after every performance.
+- **Instant AI Sparring** — an AI opponent is always available from matchmaking, with a deterministic local fallback during model outages.
+- **Seasons, Format Ratings, Tournaments & Clubs** — persistent competitive identity beyond a single global Elo.
+- **Education Workspace** — classrooms, join codes, assignments, custom rubrics, randomized positions, AI-use policies, and integrity reporting.
+- **Professional Simulations** — sales, negotiation, design review, investor, and policy challenge rooms.
+- **Trust & Safety** — result appeals, judge-version tracking, moderation reports, fairness checks, and portable credential storage.
+
+Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
+
 ### 🎯 Core Debate Engine
 - **Real-time 1v1 debates** via WebSocket with server-authoritative turn management.
 - **Dynamic Stance Mapping** — Automatically parses debate topics (e.g., "Veg vs Non-Veg") to generate tailored, context-aware mission objectives for each role.
@@ -359,8 +370,9 @@ cd frontend && npm install && npm run dev
 
 1. Create a new project on [Supabase](https://supabase.com)
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
-3. Enable Row Level Security as needed
-4. Copy your project URL and service key into `backend/.env`
+3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/004_arena_os.sql` in numeric order (existing deployments can apply only unapplied migrations)
+4. Review the included Row Level Security policies for your organization’s privacy requirements
+5. Copy your project URL and service key into `backend/.env`
 
 ---
 
@@ -380,9 +392,17 @@ docker compose -f observability/docker-compose.yml up -d --pull never
 
 Open Grafana at `http://localhost:3001` with `admin` / `admin`, then load the `Socratic Arena Robustness Overview` dashboard. For automatic Discord/Slack-style alerts, set `ALERT_WEBHOOK_URL` before starting Docker Compose; the independent alert relay still works if the backend crashes.
 
+### Robustness Proof
+
+The latest local evidence run combined the built-in backend robustness runner with the sibling `socratic-swarm-tester` repo. It reached 84 peak Socket.IO clients, 2 active matches, 7,220 received realtime messages, 13 emitted turns, 7 simulated drops, and 0 rage quits/reconnects.
+
+![Grafana and Prometheus robustness evidence](docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/grafana-dashboard.png)
+
+![Alertmanager evidence alert](docs/robustness/runs/2026-06-30-local-breakdown-after-metrics-cache/screenshots/alertmanager-alerts.png)
+
 Full runbook: [`observability/README.md`](observability/README.md).
 
-Robustness proof and screenshots: [`docs/robustness/README.md`](docs/robustness/README.md).
+Robustness proof, screenshots, and raw results: [`docs/robustness/README.md`](docs/robustness/README.md).
 
 ---
 

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { ArrowLeft, User, Clock, Trophy, Vote, BarChart3, Target, Play, Square, Loader2, Share2, Download, Sparkles, Quote } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import TrustResultPanel from './TrustResultPanel';
 
 const MatchReview = () => {
   const { matchId } = useParams();
@@ -576,6 +577,8 @@ const MatchReview = () => {
               </div>
             </div>
           </div>
+
+          <TrustResultPanel match={match} currentUser={currentUser} />
 
           {/* Audience Sentiment (Added Below AI Radar) */}
           <div className="bg-[#0b0f19] p-6 rounded-xl border border-slate-800 shadow-lg mt-8">

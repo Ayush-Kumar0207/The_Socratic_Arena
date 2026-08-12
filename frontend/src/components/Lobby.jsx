@@ -1,4 +1,4 @@
-import { Users, Clock, Shield, Swords, ArrowRight, Shuffle, Sparkles, AlertCircle, X, Copy, CheckCircle2, Link2 } from 'lucide-react';
+import { Users, Clock, Shield, Swords, ArrowRight, Shuffle, Sparkles, AlertCircle, X, Copy, CheckCircle2, Link2, Bot } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { generateStances } from '../utils/stanceUtils';
@@ -374,6 +374,16 @@ const Lobby = ({ socket, user }) => {
                       }`} />
                     <span>{isPaired ? 'Start Debate' : 'Enter Arena'}</span>
                     <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
+                  </button>
+                )}
+
+                {!isPaired && (
+                  <button
+                    onClick={() => navigate(`/practice?${new URLSearchParams({ mode: 'sparring', topic: topic.title, stance: selectedRole === 'Critic' ? 'against' : 'for' }).toString()}`)}
+                    className="w-full sm:w-80 flex items-center justify-center gap-2 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 px-6 py-3 rounded-xl border border-violet-500/30 transition-all text-sm font-bold"
+                  >
+                    <Bot className="h-4 w-4" />
+                    Practice instantly with AI
                   </button>
                 )}
 

@@ -1,6 +1,9 @@
 -- ========================================================================================
 -- THE SOCRATIC ARENA: MASTER DATABASE SCHEMA
 -- ========================================================================================
+-- After this base schema, apply backend/migrations/*.sql in numeric order.
+-- Migration 004 installs Arena OS (panel audits, coaching, competition,
+-- education, simulations, credentials, appeals, and moderation).
 -- 
 -- ORDER OF EXECUTION (THE DEPENDENCY TREE):
 --   LEVEL 1: FOUNDATION (profiles, user_follows)

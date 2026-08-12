@@ -33,6 +33,21 @@ This stage intentionally uses invalid JWTs. A clean `Authentication Error` is co
 | 75 | 75.0 | 600 | 0.00% | 325.9 | PASS |
 | 100 | 100.1 | 801 | 0.00% | 284.2 | PASS |
 
+## Realtime Swarm Match Pressure
+
+A sibling `socratic-swarm-tester` run was executed locally with `ENABLE_SWARM_TEST_AUTH=true` and `SWARM_BOT_TOKEN=SWARM_SECRET_OVERRIDE_123`, which lets synthetic bots exercise the realtime match path without Supabase user pollution.
+
+| Scenario | Result |
+|---|---|
+| Swarm composition | 4 debaters + 80 spectators |
+| Peak Socket.IO clients | 84 |
+| Peak active matches | 2 |
+| Total messages emitted | 13 |
+| Total messages received | 7,220 |
+| Simulated dropped packets | 7 |
+| Rage quits / reconnects | 0 / 0 |
+| Exported tester report | `socratic-swarm-tester/results/swarm-results-2026-06-30T12-29-45-408Z.json` in the sibling tester repo |
+
 ## Metrics Snapshot
 
 ### Before
@@ -136,7 +151,7 @@ Screenshots captured beside this report under `screenshots/`:
 
 ![Benchmark evidence](screenshots/benchmark-evidence.png)
 
-![Grafana dashboard](screenshots/grafana-dashboard.png)
+![Grafana/Prometheus live metric evidence](screenshots/grafana-dashboard.png)
 
 ![Prometheus query](screenshots/prometheus-query.png)
 
@@ -145,5 +160,5 @@ Screenshots captured beside this report under `screenshots/`:
 ## Notes And Limits
 
 - This run targets local infrastructure only by default. Do not run destructive load against Vercel/Render/Supabase without explicit provider-approved limits.
-- Authenticated full-match pressure requires seeded test users and valid Supabase JWTs. This report therefore separates public HTTP pressure from unauthenticated socket rejection pressure.
+- Production authenticated full-match pressure still requires provider-approved limits and seeded test users. Local full-match pressure is covered by the synthetic swarm token path, which exercises rooms, spectators, turns, cognitive insights, disconnect cleanup, and metrics without touching production data.
 - The ceiling is a measured threshold for this machine, Node version, and current background load; cloud numbers will differ.
