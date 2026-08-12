@@ -46,11 +46,10 @@
 
 ## 📸 Preview
 
-<!-- Replace with your actual screenshots -->
-
-| Dashboard & Cognitive Profile | Live Debate Arena | Explore & Discovery Hub |
-|:---:|:---:|:---:|
-| *Elo rating, radar chart, recent debates, social network* | *Real-time 1v1 with typewriter effect, turn timer, role badges* | *AI-categorized topics across 12 domains, trending arenas* |
+| Arena OS & Reasoning Profile | Explore & Discovery Hub |
+|:---:|:---:|
+| [![Arena OS coaching and reasoning profile](docs/screenshots/arena-os.png)](https://socratic-arena.vercel.app/arena-os) | [![Explore trending debate topics](docs/screenshots/explore.png)](https://socratic-arena.vercel.app/explore) |
+| *Targeted coaching, competitive identity, classrooms, simulations, and trust workflows* | *Trending arenas, topic discovery, saved interests, and live lobby entry* |
 
 ---
 
@@ -422,7 +421,7 @@ Robustness proof, screenshots, and raw results: [`docs/robustness/README.md`](do
 - [x] Progressive Web App (PWA) integration and offline support
 - [x] Fully responsive mobile-first UI optimization
 - [x] Abandoned Match UI cleanup and precise stat tracking
-- [ ] AI Judge Lifeline — Summon the AI to fact-check mid-debate (Objection System)
+- [x] AI Judge Lifeline — Summon the AI to fact-check mid-debate (Objection System)
 - [x] Pragmatic Affective Engine v2 — Tone detection, auto-punctuation, and visual auras
 - [x] Dynamic Stance Mapping — tailored objectives for comparitive topics
 - [x] AI Highlights — Automatically generate and extract key turning points from debates
@@ -437,6 +436,8 @@ Robustness proof, screenshots, and raw results: [`docs/robustness/README.md`](do
 ## 🤝 Contributing
 
 Contributions make the open-source community thrive. Any contribution is **greatly appreciated**.
+
+Public-beta users can also [report a bug](https://github.com/Ayush-Kumar0207/The_Socratic_Arena/issues/new?template=bug_report.yml) or [share product feedback](https://github.com/Ayush-Kumar0207/The_Socratic_Arena/issues/new?template=product_feedback.yml). Please report security issues privately through [GitHub Security Advisories](https://github.com/Ayush-Kumar0207/The_Socratic_Arena/security/advisories/new), not a public issue.
 
 1. **Fork** the repository
 2. **Create** your feature branch (`git checkout -b feature/AmazingFeature`)

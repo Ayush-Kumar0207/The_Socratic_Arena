@@ -1,0 +1,40 @@
+name: Product feedback
+description: Share an idea or public-beta experience
+title: "[Feedback]: "
+labels: ["feedback", "public-beta"]
+body:
+  - type: markdown
+    attributes:
+      value: Tell us what helped your reasoning and what created friction. Please do not include private or sensitive information.
+  - type: dropdown
+    id: audience
+    attributes:
+      label: How are you using the Arena?
+      options:
+        - Individual practice
+        - Live competitive debate
+        - Campus club or league
+        - Classroom or education
+        - Professional simulation
+        - Evaluation or research
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: What was valuable?
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: What was confusing or frustrating?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would make you return next week?
+    validations:
+      required: true

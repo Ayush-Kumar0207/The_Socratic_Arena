@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a reproducible problem in the public beta
+title: "[Bug]: "
+labels: ["bug", "public-beta"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve The Socratic Arena. Do not include passwords, tokens, private debate content, or other personal data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+      placeholder: I expected… but instead…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open…
+        2. Select…
+        3. Observe…
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Sign-in or account
+        - Live 1v1 debate
+        - AI judging or evidence
+        - Arena OS or practice
+        - Tournament or team debate
+        - Classroom or organization
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and device
+      placeholder: Chrome 140 on Windows 11
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional evidence
+      description: Add sanitized screenshots, console errors, or a public match URL if helpful.
