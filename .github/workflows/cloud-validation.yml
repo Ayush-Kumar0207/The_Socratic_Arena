@@ -1,0 +1,60 @@
+name: Cloud Runtime Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      # BrowserRouter-only SPA: the remaining React Router advisory applies to
+      # server/RSC action handling, which this application does not use.
+      - run: npm audit --omit=dev --audit-level=critical
+        working-directory: frontend
+      - run: npm run lint -- --max-warnings=0
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+        env:
+          VITE_BACKEND_URL: http://localhost:5000
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_ANON_KEY: public-placeholder
+      - run: npm ci
+        working-directory: backend
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: backend
+      - run: find . -path './node_modules' -prune -o -name '*.js' -print0 | xargs -0 -n1 node --check
+        working-directory: backend
+
+  containers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile
+          push: false
+          tags: socratic-arena-${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

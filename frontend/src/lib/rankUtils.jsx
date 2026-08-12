@@ -9,7 +9,7 @@ import React from 'react';
  * 1500-1799: Philosopher (Platinum/Purple)
  * 1800+: Oracle (Diamond/Cyan glowing)
  */
-export const getRankInfo = (elo) => {
+const getRankInfo = (elo) => {
   const rating = Number(elo) || 0;
 
   if (rating < 1050) {

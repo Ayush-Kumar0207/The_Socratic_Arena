@@ -15,8 +15,6 @@ const MatchReview = () => {
   const [hasVoted, setHasVoted] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isResolving, setIsResolving] = useState(false);
-  const [, setPopularTopics] = useState([]);
   const [displayedTranscript, setDisplayedTranscript] = useState([]);
   const isPlayingRef = useRef(false);
   const messagesEndRef = useRef(null);
@@ -111,42 +109,6 @@ const MatchReview = () => {
     if (freshMatch) setMatch(freshMatch);
   };
 
-  const fetchPopularTopics = async () => {
-    try {
-      console.log('🔍 [POPULAR TOPICS] Fetching popular topics...');
-
-      // Count matches per topic (including active matches)
-      const { data: topicCounts, error } = await supabase
-        .from('matches')
-        .select('topic_title, status')
-        .in('status', ['active', 'completed', 'pending_votes']);
-
-      if (error) throw error;
-
-      console.log('📊 [POPULAR TOPICS] Raw topic data:', topicCounts);
-
-      // Count matches per topic
-      const topicMap = {};
-      topicCounts?.forEach(match => {
-        const topic = match.topic_title || 'Unknown Topic';
-        topicMap[topic] = (topicMap[topic] || 0) + 1;
-      });
-
-      console.log('🗺️ [POPULAR TOPICS] Topic counts map:', topicMap);
-
-      // Convert to array and sort by count (descending)
-      const sortedTopics = Object.entries(topicMap)
-        .map(([topic, count]) => ({ topic, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5); // Top 5 topics
-
-      console.log('🏆 [POPULAR TOPICS] Sorted topics:', sortedTopics);
-      setPopularTopics(sortedTopics);
-    } catch (err) {
-      console.error('❌ [POPULAR TOPICS] Error fetching popular topics:', err);
-    }
-  };
-
   useEffect(() => {
     let pollCount = 0;
     let pollInterval;
@@ -210,7 +172,6 @@ const MatchReview = () => {
 
     if (matchId) {
       fetchMatchData();
-      fetchPopularTopics(); // Fetch popular topics
       pollInterval = setInterval(fetchMatchData, 3000);
     }
 
@@ -249,15 +210,15 @@ const MatchReview = () => {
   }, [matchId]);
 
   const hasScrolledRef = useRef(false);
-  const matchTranscript = match?.transcript;
+  const hasTranscript = Boolean(match?.transcript);
 
   // Auto-scroll to bottom only once when transcript initial load happens
   useEffect(() => {
-    if (matchTranscript && !hasScrolledRef.current) {
+    if (hasTranscript && !hasScrolledRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       hasScrolledRef.current = true;
     }
-  }, [matchTranscript]);
+  }, [hasTranscript]);
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -337,206 +298,6 @@ const MatchReview = () => {
       await fetchVotes(match.id, currentUser.id);
     } catch (err) {
       console.error('Error submitting vote:', err);
-    }
-  };
-
-  const _handleResolveMatch = async () => {
-    if (!match || isResolving) return;
-
-    console.log('🧪 [ELO TEST] Starting match resolution...');
-    console.log('📊 [ELO TEST] Match Data:', {
-      id: match.id,
-      critic_id: match.critic_id,
-      defender_id: match.defender_id,
-      status: match.status,
-      ai_scores: match.ai_scores,
-      audience_votes_critic: match.audience_votes_critic,
-      audience_votes_defender: match.audience_votes_defender
-    });
-
-    try {
-      setIsResolving(true);
-
-      // 0. Double-check match status right before resolving (prevents race conditions)
-      const { data: latestMatch, error: statusError } = await supabase
-        .from('matches')
-        .select('status')
-        .eq('id', match.id)
-        .single();
-
-      if (statusError || !latestMatch || latestMatch.status !== 'pending_votes') {
-        console.warn('⚠️ [ELO TEST] Conflict detected: Match already resolved or and no longer pending.');
-        if (latestMatch) setMatch(prev => ({ ...prev, ...latestMatch }));
-        setIsResolving(false);
-        return;
-      }
-
-      // 1. Calculate Scores and Tally Votes
-      const criticVotes = match.audience_votes_critic || 0;
-      const defenderVotes = match.audience_votes_defender || 0;
-      const totalVotes = criticVotes + defenderVotes;
-
-      console.log('🗳️ [ELO TEST] Vote Tally:', { criticVotes, defenderVotes, totalVotes });
-
-      // Safety check for AI scores
-      if (!match.ai_scores || !match.ai_scores.critic || !match.ai_scores.defender) {
-        throw new Error('AI scores are missing or incomplete');
-      }
-
-      // AI Weights: Logic (40%), Facts (40%), Relevance (20%)
-      const criticAi = (match.ai_scores.critic.logic * 0.4) + (match.ai_scores.critic.facts * 0.4) + (match.ai_scores.critic.relevance * 0.2) || 0;
-      const defenderAi = (match.ai_scores.defender.logic * 0.4) + (match.ai_scores.defender.facts * 0.4) + (match.ai_scores.defender.relevance * 0.2) || 0;
-
-      console.log('🤖 [ELO TEST] AI Scores:', {
-        criticAi,
-        defenderAi,
-        criticBreakdown: match.ai_scores.critic,
-        defenderBreakdown: match.ai_scores.defender
-      });
-
-      // Normalize AI diff (-1.0 to 1.0 scale)
-      const nAi = (criticAi - defenderAi) / 10;
-
-      // Calculate Audience Sentiment (-1.0 to 1.0 scale)
-      const sAudience = totalVotes > 0 ? (criticVotes - defenderVotes) / totalVotes : 0;
-
-      console.log('📈 [ELO TEST] Normalized Scores:', { nAi, sAudience });
-
-      // Composite Score (AI 70% / Audience 30%)
-      const composite = (nAi * 0.7) + (sAudience * 0.3);
-
-      console.log('🎯 [ELO TEST] Composite Score:', composite);
-
-      // Determine Match Score (S)
-      let sCritic, sDefender, winnerId = null;
-      if (composite > 0.1) {
-        sCritic = 1; sDefender = 0; winnerId = match.critic_id;
-      } else if (composite < -0.1) {
-        sCritic = 0; sDefender = 1; winnerId = match.defender_id;
-      } else {
-        sCritic = 0.5; sDefender = 0.5; winnerId = null;
-      }
-
-      console.log('🏆 [ELO TEST] Match Result:', {
-        sCritic,
-        sDefender,
-        winnerId,
-        winner: winnerId === match.critic_id ? 'Critic' : winnerId === match.defender_id ? 'Defender' : 'Tie'
-      });
-
-      // 2. Fetch Player Profiles for Elo Calculation
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, elo_rating')
-        .in('id', [match.critic_id, match.defender_id]);
-
-      if (profileError || !profiles || profiles.length < 2) {
-        console.error('Error fetching player profiles:', profileError);
-        throw new Error('Failed to fetch player profiles for Elo calculation');
-      }
-
-      const criticProfile = profiles.find(p => p.id === match.critic_id);
-      const defenderProfile = profiles.find(p => p.id === match.defender_id);
-
-      if (!criticProfile || !defenderProfile) {
-        throw new Error('Missing player profile data');
-      }
-
-      const rCritic = criticProfile.elo_rating || 1200;
-      const rDefender = defenderProfile.elo_rating || 1200;
-
-      console.log('👤 [ELO TEST] Player Ratings:', {
-        critic: { id: match.critic_id, rating: rCritic },
-        defender: { id: match.defender_id, rating: rDefender }
-      });
-
-      // 3. Expected Probability (E)
-      const eCritic = 1 / (1 + Math.pow(10, (rDefender - rCritic) / 400));
-      const eDefender = 1 - eCritic;
-
-      console.log('📊 [ELO TEST] Expected Probabilities:', { eCritic, eDefender });
-
-      // 4. Fetch Match Counts for K-Factor
-      const getKFactor = async (userId, rating) => {
-        try {
-          const { count } = await supabase.from('matches').select('*', { count: 'exact', head: true }).or(`critic_id.eq.${userId},defender_id.eq.${userId}`).eq('status', 'completed');
-          if (rating > 1800) return 15;
-          if ((count || 0) < 10) return 50;
-          return 30;
-        } catch (err) {
-          console.warn('Error fetching match count for K-factor, using default:', err);
-          return 30;
-        }
-      };
-
-      const kCritic = await getKFactor(match.critic_id, rCritic);
-      const kDefender = await getKFactor(match.defender_id, rDefender);
-
-      console.log('⚖️ [ELO TEST] K-Factors:', { kCritic, kDefender });
-
-      // 5. Calculate New Ratings
-      let newCriticRating = Math.round(rCritic + kCritic * (sCritic - eCritic));
-      let newDefenderRating = Math.round(rDefender + kDefender * (sDefender - eDefender));
-
-      console.log('🧮 [ELO TEST] Rating Calculations:', {
-        critic: { old: rCritic, new: newCriticRating, change: newCriticRating - rCritic },
-        defender: { old: rDefender, new: newDefenderRating, change: newDefenderRating - rDefender }
-      });
-
-      // 6. Performance Bonus (+5 Elo for >90% Audience Vote)
-      if (totalVotes >= 5) { // Minimum votes for bonus
-        if (sCritic === 1 && (criticVotes / totalVotes) > 0.9) {
-          newCriticRating += 5;
-          console.log('🎁 [ELO TEST] Critic bonus +5 (90%+ audience support)');
-        }
-        if (sDefender === 1 && (defenderVotes / totalVotes) > 0.9) {
-          newDefenderRating += 5;
-          console.log('🎁 [ELO TEST] Defender bonus +5 (90%+ audience support)');
-        }
-      }
-
-      console.log('💰 [ELO TEST] Final Ratings:', {
-        critic: { final: newCriticRating, totalChange: newCriticRating - rCritic },
-        defender: { final: newDefenderRating, totalChange: newDefenderRating - rDefender }
-      });
-
-      // 7. Atomic Updates
-      const updatePromises = [
-        supabase.from('profiles').update({ elo_rating: newCriticRating }).eq('id', match.critic_id),
-        supabase.from('profiles').update({ elo_rating: newDefenderRating }).eq('id', match.defender_id),
-        supabase.from('matches').update({
-          status: 'completed',
-          winner_id: winnerId,
-          end_reason: 'standard'
-        }).eq('id', match.id)
-      ];
-
-      console.log('💾 [ELO TEST] Executing database updates...');
-      await Promise.all(updatePromises);
-
-      // Update local state
-      setMatch(prev => ({ ...prev, status: 'completed', winner_id: winnerId }));
-      setIsResolving(false);
-
-      // Refresh popular topics after match resolution
-      await fetchPopularTopics();
-
-      console.log('✅ [ELO TEST] Match resolved successfully!');
-      console.log(`🏆 [ELO TEST] Winner: ${winnerId === match.critic_id ? 'Critic' : winnerId === match.defender_id ? 'Defender' : 'Tie'}`);
-      console.log(`📈 [ELO TEST] Elo Updated: Critic ${rCritic} → ${newCriticRating}, Defender ${rDefender} → ${newDefenderRating}`);
-
-    } catch (err) {
-      console.error('❌ [ELO TEST] Match resolution error:', err);
-      console.error('❌ [ELO TEST] Error details:', {
-        message: err.message,
-        stack: err.stack,
-        matchId: match?.id,
-        matchStatus: match?.status
-      });
-      setIsResolving(false);
-
-      // Show user-friendly error message
-      alert(`Failed to resolve match: ${err.message || 'Unknown error occurred. Check console for details.'}`);
     }
   };
 

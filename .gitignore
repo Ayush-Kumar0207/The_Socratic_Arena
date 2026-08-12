@@ -1,3 +1,9 @@
+# Never commit local environment files or credentials.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
 # Local helper scripts (not required for app runtime)
 frontend/run_lint.bat
 frontend/run_build.bat

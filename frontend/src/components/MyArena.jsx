@@ -2,7 +2,7 @@ import { Swords, Bookmark, BookmarkCheck, Users, Activity, Search, X, Layers, Co
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { getTopicDomain, broadTopicsList } from '../lib/domainUtils';
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 
 const MyArena = ({ user, socket }) => {
   const navigate = useNavigate();
@@ -38,7 +38,6 @@ const MyArena = ({ user, socket }) => {
   const [trendingFeedback, setTrendingFeedback] = useState(null);
   const [savedFeedback, setSavedFeedback] = useState(null);
   const searchTimeoutRef = React.useRef(null);
-  const [isLoading, setIsLoading] = useState(false);
 
   const categoryIcons = useMemo(() => ({
     Science: <FlaskConical className="h-4 w-4" />,
@@ -67,13 +66,13 @@ const MyArena = ({ user, socket }) => {
     return scores;
   }, [followedTopics]);
 
-  const getRelevanceScore = (title) => {
+  const getRelevanceScore = useCallback((title) => {
     if (!user) return 0;
     const domain = getTopicDomain(title).domain;
     const isTopicFollowed = followIds.includes(allTopics.find(t => t.title === title)?.id);
     // Base score from domain interest + bonus if specifically followed
     return (userInterestScores[domain] || 0) + (isTopicFollowed ? 5 : 0);
-  };
+  }, [allTopics, followIds, user, userInterestScores]);
 
   // Helper to identify junk topics or prompt injections
   const isJunkTopic = (title) => {
@@ -90,12 +89,13 @@ const MyArena = ({ user, socket }) => {
     if (!user) return;
 
     const fetchData = async () => {
-      setIsLoading(true);
       // 1. Fetch ALL topics
       const { data: topicsData, error: topicError } = await supabase
         .from('topics')
         .select('*')
         .order('created_at', { ascending: false });
+
+      if (topicError) console.error('[MyArena] Topics fetch failed:', topicError.message);
 
       if (topicsData) {
         setAllTopics(topicsData);
@@ -108,6 +108,8 @@ const MyArena = ({ user, socket }) => {
         .select('topic_id')
         .eq('user_id', user.id);
 
+      if (followError) console.error('[MyArena] Follows fetch failed:', followError.message);
+
       const ids = (follows || []).map(f => f.topic_id);
       setFollowIds(ids);
       localStorage.setItem('myarena_follow_ids', JSON.stringify(ids));
@@ -115,7 +117,6 @@ const MyArena = ({ user, socket }) => {
       const followed = (topicsData || []).filter(t => ids.includes(t.id));
       setFollowedTopics(followed);
       localStorage.setItem('myarena_topics', JSON.stringify(followed));
-      const followedTitles = followed.map(t => t.title);
 
       // 3. Fetch Matches
       const { data: matchData } = await supabase
@@ -149,7 +150,6 @@ const MyArena = ({ user, socket }) => {
         localStorage.setItem('myarena_counts', JSON.stringify(activeCounts));
         localStorage.setItem('myarena_all_active_matches', JSON.stringify(activeMatches));
       }
-      setIsLoading(false);
     };
 
     fetchData();
@@ -200,10 +200,58 @@ const MyArena = ({ user, socket }) => {
     };
   }, [user, socket]);
 
+  const handleToggleFollow = useCallback(async (topicId, newlyCreatedTopic = null) => {
+    if (togglingIds.has(topicId)) return;
+    
+    setTogglingIds(prev => new Set(prev).add(topicId));
+
+    try {
+      const isCurrentlyFollowed = followIds.includes(topicId);
+      
+      // Optimistic UI update
+      setFollowIds(prev => {
+        const next = isCurrentlyFollowed ? prev.filter(id => id !== topicId) : [...prev, topicId];
+        localStorage.setItem('myarena_follow_ids', JSON.stringify(next));
+        return next;
+      });
+
+      setFollowedTopics(() => {
+        let source = [...allTopics];
+        if (newlyCreatedTopic && !source.some(t => t.id === newlyCreatedTopic.id)) {
+          source = [newlyCreatedTopic, ...source];
+        }
+        
+        const nextIds = isCurrentlyFollowed ? followIds.filter(id => id !== topicId) : [...followIds, topicId];
+        const next = source.filter(t => nextIds.includes(t.id));
+        localStorage.setItem('myarena_topics', JSON.stringify(next));
+        return next;
+      });
+
+      if (isCurrentlyFollowed) {
+        const { error } = await supabase.from('topic_follows').delete().eq('user_id', user.id).eq('topic_id', topicId);
+        if (error) console.error("Unfollow error", error);
+      } else {
+        const { error } = await supabase.from('topic_follows').insert({ user_id: user.id, topic_id: topicId });
+        if (error) {
+          console.error("Follow error", error);
+          // Rollback on error
+          setFollowIds(prev => prev.filter(id => id !== topicId));
+          setFollowedTopics(prev => prev.filter(t => t.id !== topicId));
+        }
+      }
+    } finally {
+      setTogglingIds(prev => {
+        const next = new Set(prev);
+        next.delete(topicId);
+        return next;
+      });
+    }
+  }, [allTopics, followIds, togglingIds, user?.id]);
+
   // Auto-follow pending topics once they appear in the database
   useEffect(() => {
     if (pendingFollows.size === 0) return;
-    
+
     let allFound = true;
     pendingFollows.forEach((pendingTitle) => {
       const found = allTopics.find(t => (t.title || '').toLowerCase() === pendingTitle);
@@ -235,55 +283,7 @@ const MyArena = ({ user, socket }) => {
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [allTopics, pendingFollows]);
-
-  const handleToggleFollow = async (topicId, newlyCreatedTopic = null) => {
-    if (togglingIds.has(topicId)) return;
-    
-    setTogglingIds(prev => new Set(prev).add(topicId));
-
-    try {
-      const isCurrentlyFollowed = followIds.includes(topicId);
-      
-      // Optimistic UI update
-      setFollowIds(prev => {
-        const next = isCurrentlyFollowed ? prev.filter(id => id !== topicId) : [...prev, topicId];
-        localStorage.setItem('myarena_follow_ids', JSON.stringify(next));
-        return next;
-      });
-
-      setFollowedTopics(prev => {
-        let source = [...allTopics];
-        if (newlyCreatedTopic && !source.some(t => t.id === newlyCreatedTopic.id)) {
-          source = [newlyCreatedTopic, ...source];
-        }
-        
-        const nextIds = isCurrentlyFollowed ? followIds.filter(id => id !== topicId) : [...followIds, topicId];
-        const next = source.filter(t => nextIds.includes(t.id));
-        localStorage.setItem('myarena_topics', JSON.stringify(next));
-        return next;
-      });
-
-      if (isCurrentlyFollowed) {
-        const { error } = await supabase.from('topic_follows').delete().eq('user_id', user.id).eq('topic_id', topicId);
-        if (error) console.error("Unfollow error", error);
-      } else {
-        const { error } = await supabase.from('topic_follows').insert({ user_id: user.id, topic_id: topicId });
-        if (error) {
-          console.error("Follow error", error);
-          // Rollback on error
-          setFollowIds(prev => prev.filter(id => id !== topicId));
-          setFollowedTopics(prev => prev.filter(t => t.id !== topicId));
-        }
-      }
-    } finally {
-      setTogglingIds(prev => {
-        const next = new Set(prev);
-        next.delete(topicId);
-        return next;
-      });
-    }
-  };
+  }, [allTopics, handleToggleFollow, pendingFollows]);
 
   const handleEnterLobby = (topic) => {
     navigate(`/lobby/${topic.id}`, { state: { topic } });
@@ -303,7 +303,7 @@ const MyArena = ({ user, socket }) => {
     });
     
     return Array.from(domainSet.values());
-  }, [followedTopics, domainNamesLower, categoryIcons]);
+  }, [followedTopics, domainNamesLower]);
 
   // Section 3: Saved Arenas (Specific Followed Topics)
   const filteredFollowedTopics = useMemo(() => {
@@ -326,7 +326,7 @@ const MyArena = ({ user, socket }) => {
       result = result.slice(0, 5);
     }
     return result;
-  }, [followedTopics, activeTab, savedSearchQuery, topicTotals, domainNamesLower]);
+  }, [followedTopics, activeTab, savedSearchQuery, topicTotals, domainNamesLower, getRelevanceScore]);
 
   const trendingTopicsDataAll = useMemo(() => {
     const followedCategories = followedTopics
@@ -368,7 +368,7 @@ const MyArena = ({ user, socket }) => {
 
     // We return all relevant topics. The slice limit is applied only when not searching.
     return relevantTopics;
-  }, [allTopics, followedTopics, activeTab, topicTotals, domainNamesLower]);
+  }, [allTopics, followedTopics, activeTab, topicTotals, domainNamesLower, getRelevanceScore]);
 
   // Section 2: Trending Debates Filtered and Sorted
   const filteredTrendingTopics = useMemo(() => {
@@ -384,19 +384,6 @@ const MyArena = ({ user, socket }) => {
 
     return result;
   }, [trendingTopicsDataAll, trendingSearchQuery]);
-
-  // Helper to group matches for the trending section
-  const groupMatches = (matches) => {
-    const groups = {};
-    matches
-      .filter(m => (m.topic_title || m.topic) && (m.topic_title || m.topic).toLowerCase() !== 'custom debate')
-      .forEach(m => {
-        const title = m.topic_title || m.topic;
-        if (!groups[title]) groups[title] = [];
-        groups[title].push(m);
-      });
-    return groups;
-  };
 
   const handleTrendingSearch = () => {
     if (trendingSearchQuery.trim().length < 3) return;
