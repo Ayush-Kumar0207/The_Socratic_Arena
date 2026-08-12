@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://socratic-arena.vercel.app/sitemap.xml
