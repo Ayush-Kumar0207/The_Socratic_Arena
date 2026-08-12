@@ -1,14 +1,28 @@
-import { Users, Clock, Shield, Swords, ArrowRight, Shuffle, Sparkles, AlertCircle, X, Copy, CheckCircle2, Link2, Bot } from 'lucide-react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useEffect, useState, useRef, useMemo } from 'react';
-import { generateStances } from '../utils/stanceUtils';
+import {
+  Users,
+  Clock,
+  Shield,
+  Swords,
+  ArrowRight,
+  Shuffle,
+  Sparkles,
+  AlertCircle,
+  X,
+  Copy,
+  CheckCircle2,
+  Link2,
+  Bot,
+} from "lucide-react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState, useRef, useMemo } from "react";
+import { generateStances } from "../utils/stanceUtils";
 
 const Lobby = ({ socket, user }) => {
   const { topicId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMatchmaking, setIsMatchmaking] = useState(false);
-  const [selectedRole, setSelectedRole] = useState('Random');
+  const [selectedRole, setSelectedRole] = useState("Random");
 
   // Private Arena state
   const [arenaCode, setArenaCode] = useState(null);
@@ -21,13 +35,14 @@ const Lobby = ({ socket, user }) => {
   const [copied, setCopied] = useState(false);
   const [privateError, setPrivateError] = useState(null);
 
-
-
   // Check if we arrived via "Join Arena" with an arenaCode in route state
   const incomingArenaCode = location.state?.arenaCode;
 
   // Extract topic from route state (or fallback)
-  const topic = location.state?.topic || { id: topicId, title: 'Unknown Topic' };
+  const topic = location.state?.topic || {
+    id: topicId,
+    title: "Unknown Topic",
+  };
 
   // Calculate dynamic stances
   const stances = useMemo(() => generateStances(topic.title), [topic.title]);
@@ -42,16 +57,18 @@ const Lobby = ({ socket, user }) => {
       let assignedRole = null;
       if (user?.id) {
         if (data.criticUserId === user.id) {
-          assignedRole = 'Critic';
+          assignedRole = "Critic";
         } else if (data.defenderUserId === user.id) {
-          assignedRole = 'Defender';
+          assignedRole = "Defender";
         }
       }
       // Fallback to socket-based role detection
       if (!assignedRole && data.roles) {
         assignedRole = data.roles[socket.id] || null;
       }
-      navigate(`/arena/${data.roomId}`, { state: { ...data, assignedRole, stances } });
+      navigate(`/arena/${data.roomId}`, {
+        state: { ...data, assignedRole, stances },
+      });
     };
 
     const handleWaiting = () => {
@@ -62,8 +79,8 @@ const Lobby = ({ socket, user }) => {
     const handleArenaCreated = ({ arenaCode: code, arenaId: id }) => {
       setArenaCode(code);
       setArenaId(id);
-      setMyRole('creator');
-      myRoleRef.current = 'creator';
+      setMyRole("creator");
+      myRoleRef.current = "creator";
       setPrivateError(null);
     };
 
@@ -72,19 +89,19 @@ const Lobby = ({ socket, user }) => {
       setIsPaired(true);
       setPrivateError(null);
       if (creatorId === user?.id) {
-        setMyRole('creator');
-        myRoleRef.current = 'creator';
+        setMyRole("creator");
+        myRoleRef.current = "creator";
         setOpponentId(joinerId);
       } else {
-        setMyRole('joiner');
-        myRoleRef.current = 'joiner';
+        setMyRole("joiner");
+        myRoleRef.current = "joiner";
         setOpponentId(creatorId);
       }
     };
 
     const handleStanceUpdate = ({ creatorStance, joinerStance }) => {
       // Use ref to always get the latest myRole (avoids stale closure)
-      if (myRoleRef.current === 'creator') {
+      if (myRoleRef.current === "creator") {
         setOpponentStance(joinerStance);
       } else {
         setOpponentStance(creatorStance);
@@ -95,13 +112,18 @@ const Lobby = ({ socket, user }) => {
       setPrivateError(message);
 
       // If debate has ended, redirect back after showing the error
-      if (message && (message.includes('already ended') || message.includes('expired') || message.includes('already full'))) {
+      if (
+        message &&
+        (message.includes("already ended") ||
+          message.includes("expired") ||
+          message.includes("already full"))
+      ) {
         setTimeout(() => {
           // Navigate back to previous page, or default to explore
           if (window.history.length > 1) {
             navigate(-1);
           } else {
-            navigate('/explore');
+            navigate("/explore");
           }
         }, 3000);
       } else {
@@ -113,91 +135,101 @@ const Lobby = ({ socket, user }) => {
       // If we just connected and don't have an arena code yet, try again
       if (socket.connected) {
         if (!incomingArenaCode) {
-          socket.emit('create_private_arena', {
+          socket.emit("create_private_arena", {
             userId: user?.id,
             topicId: topic.id,
-            topicTitle: topic.title
+            topicTitle: topic.title,
           });
         } else {
-          setMyRole('joiner');
-          myRoleRef.current = 'joiner';
-          socket.emit('join_private_arena', {
+          setMyRole("joiner");
+          myRoleRef.current = "joiner";
+          socket.emit("join_private_arena", {
             userId: user?.id,
-            arenaCode: incomingArenaCode
+            arenaCode: incomingArenaCode,
           });
         }
       }
     };
 
-    socket.on('connect', handleStatusChange);
-    socket.on('disconnect', handleStatusChange);
+    socket.on("connect", handleStatusChange);
+    socket.on("disconnect", handleStatusChange);
 
-    socket.on('match_found', handleMatchFound);
-    socket.on('waiting_for_opponent', handleWaiting);
-    socket.on('private_arena_created', handleArenaCreated);
-    socket.on('private_arena_joined', handleArenaJoined);
-    socket.on('private_arena_stance_update', handleStanceUpdate);
-    socket.on('private_arena_error', handlePrivateError);
+    socket.on("match_found", handleMatchFound);
+    socket.on("waiting_for_opponent", handleWaiting);
+    socket.on("private_arena_created", handleArenaCreated);
+    socket.on("private_arena_joined", handleArenaJoined);
+    socket.on("private_arena_stance_update", handleStanceUpdate);
+    socket.on("private_arena_error", handlePrivateError);
 
     // Initial attempt if connected and Auto-join logic based on how we arrived
     if (socket.connected) {
       handleStatusChange();
     } else {
       // If not connected, it might be Render cold start — wait for 'connect' event
-      console.log("[Lobby] Socket not connected, waiting for backend to wake up...");
+      console.log(
+        "[Lobby] Socket not connected, waiting for backend to wake up...",
+      );
     }
 
     return () => {
-      socket.off('connect', handleStatusChange);
-      socket.off('disconnect', handleStatusChange);
-      socket.off('match_found', handleMatchFound);
-      socket.off('waiting_for_opponent', handleWaiting);
-      socket.off('private_arena_created', handleArenaCreated);
-      socket.off('private_arena_joined', handleArenaJoined);
-      socket.off('private_arena_stance_update', handleStanceUpdate);
-      socket.off('private_arena_error', handlePrivateError);
+      socket.off("connect", handleStatusChange);
+      socket.off("disconnect", handleStatusChange);
+      socket.off("match_found", handleMatchFound);
+      socket.off("waiting_for_opponent", handleWaiting);
+      socket.off("private_arena_created", handleArenaCreated);
+      socket.off("private_arena_joined", handleArenaJoined);
+      socket.off("private_arena_stance_update", handleStanceUpdate);
+      socket.off("private_arena_error", handlePrivateError);
     };
-  }, [socket, navigate, incomingArenaCode, topic.id, topic.title, stances, user?.id]);
+  }, [
+    socket,
+    navigate,
+    incomingArenaCode,
+    topic.id,
+    topic.title,
+    stances,
+    user?.id,
+  ]);
 
   // Broadcast stance changes when paired
   useEffect(() => {
     if (!socket || !isPaired) return;
 
     if (arenaId && myRole) {
-      socket.emit('private_arena_set_stance', {
+      socket.emit("private_arena_set_stance", {
         arenaId,
         stance: selectedRole,
-        role: myRole
+        role: myRole,
       });
     }
   }, [selectedRole, isPaired, arenaId, myRole, socket]);
 
   const handleStartMatchmaking = () => {
     if (!socket) {
-      window.alert('Socket not connected');
+      window.alert("Socket not connected");
       return;
     }
 
     if (isPaired && arenaId) {
       // Private arena — start directly!
-      socket.emit('start_private_debate', { arenaId });
+      socket.emit("start_private_debate", { arenaId });
       setIsMatchmaking(true);
       return;
     }
 
     // Normal queue matchmaking
     setIsMatchmaking(true);
-    socket.emit('join_queue', {
+    socket.emit("join_queue", {
       userId: user?.id,
       topicId: topic.id,
       topicTitle: topic.title,
-      preferredRole: selectedRole
+      preferredRole: selectedRole,
     });
   };
 
   const handleLeaveQueue = () => {
     if (!socket) return;
-    socket.emit('leave_queue');
+    socket.emit("leave_queue");
     setIsMatchmaking(false);
   };
 
@@ -209,44 +241,46 @@ const Lobby = ({ socket, user }) => {
   };
 
   const formatSocraticId = (id) => {
-    if (!id) return '...';
-    return id.split('-')[0] + '...';
+    if (!id) return "...";
+    return id.split("-")[0] + "...";
   };
 
   const displayRoles = [
     {
-      id: 'Defender',
+      id: "Defender",
       name: stances.stanceA,
       icon: Shield,
       desc: stances.descA,
-      color: 'from-cyan-500 to-blue-600',
-      shadow: 'shadow-cyan-500/20',
-      border: 'border-cyan-500/30'
+      color: "from-cyan-500 to-blue-600",
+      shadow: "shadow-cyan-500/20",
+      border: "border-cyan-500/30",
     },
     {
-      id: 'Critic',
+      id: "Critic",
       name: stances.stanceB,
       icon: Swords,
       desc: stances.descB,
-      color: 'from-rose-500 to-red-600',
-      shadow: 'shadow-red-500/20',
-      border: 'border-red-500/30'
+      color: "from-rose-500 to-red-600",
+      shadow: "shadow-red-500/20",
+      border: "border-red-500/30",
     },
     {
-      id: 'Random',
-      name: 'Random Duty',
+      id: "Random",
+      name: "Random Duty",
       icon: Shuffle,
-      desc: 'Let fate decide your mission',
-      color: 'from-slate-600 to-slate-700',
-      shadow: 'shadow-slate-500/20',
-      border: 'border-slate-500/30'
-    }
+      desc: "Let fate decide your mission",
+      color: "from-slate-600 to-slate-700",
+      shadow: "shadow-slate-500/20",
+      border: "border-slate-500/30",
+    },
   ];
 
   return (
-    <div data-v="1.0.2-clean-arena" className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8 items-center justify-center">
+    <div
+      data-v="1.0.2-clean-arena"
+      className="flex flex-col min-h-[calc(100vh-64px)] bg-[#0b0f19] text-slate-200 p-8 items-center justify-center"
+    >
       <div className="max-w-4xl w-full bg-slate-900/50 backdrop-blur-md border border-[#1e293b] rounded-3xl p-8 sm:p-12 shadow-2xl relative overflow-hidden">
-
         {/* Decorative corner glows */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none" />
@@ -263,7 +297,8 @@ const Lobby = ({ socket, user }) => {
               {topic.title}
             </h1>
             <p className="text-slate-400 max-w-xl mx-auto">
-              You are about to enter the ring. Choose your combat stance carefully.
+              You are about to enter the ring. Choose your combat stance
+              carefully.
             </p>
           </header>
 
@@ -276,8 +311,12 @@ const Lobby = ({ socket, user }) => {
                     <Link2 className="h-5 w-5 text-indigo-400" />
                   </div>
                   <div className="overflow-hidden">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Arena Code — Share to invite</p>
-                    <p className="text-lg font-mono font-black text-slate-100 tracking-widest">{arenaCode}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                      Arena Code — Share to invite
+                    </p>
+                    <p className="text-lg font-mono font-black text-slate-100 tracking-widest">
+                      {arenaCode}
+                    </p>
                   </div>
                 </div>
                 <button
@@ -285,7 +324,11 @@ const Lobby = ({ socket, user }) => {
                   className="shrink-0 bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 rounded-lg p-2.5 transition-all active:scale-90"
                   title="Copy Arena Code"
                 >
-                  {copied ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : <Copy className="h-5 w-5 text-slate-400" />}
+                  {copied ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-5 w-5 text-slate-400" />
+                  )}
                 </button>
               </div>
             </div>
@@ -297,21 +340,34 @@ const Lobby = ({ socket, user }) => {
               <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="h-3 w-3 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-emerald-300 font-bold text-sm uppercase tracking-wider">Opponent Connected!</span>
+                  <span className="text-emerald-300 font-bold text-sm uppercase tracking-wider">
+                    Opponent Connected!
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">You</p>
-                    <p className="text-sm font-mono text-cyan-400">{formatSocraticId(user?.id)}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
+                      You
+                    </p>
+                    <p className="text-sm font-mono text-cyan-400">
+                      {formatSocraticId(user?.id)}
+                    </p>
                   </div>
                   <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-700/50">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Opponent</p>
-                    <p className="text-sm font-mono text-rose-400">{formatSocraticId(opponentId)}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">
+                      Opponent
+                    </p>
+                    <p className="text-sm font-mono text-rose-400">
+                      {formatSocraticId(opponentId)}
+                    </p>
                   </div>
                 </div>
                 {opponentStance && (
                   <p className="text-xs text-slate-400 text-center">
-                    Opponent chose: <span className="font-bold text-slate-200">{opponentStance}</span>
+                    Opponent chose:{" "}
+                    <span className="font-bold text-slate-200">
+                      {opponentStance}
+                    </span>
                   </p>
                 )}
               </div>
@@ -331,22 +387,30 @@ const Lobby = ({ socket, user }) => {
                 {displayRoles.map((role) => (
                   <button
                     key={role.id}
+                    aria-label={`Choose ${role.id} role`}
                     onClick={() => setSelectedRole(role.id)}
-                    className={`relative group flex flex-col items-center text-center p-6 rounded-2xl border transition-all duration-300 ${selectedRole === role.id
-                        ? `bg-slate-800/80 ${role.border} ${role.shadow} ring-2 ring-offset-4 ring-offset-slate-900 ring-opacity-50 ${role.id === 'Critic' ? 'ring-red-500' : role.id === 'Defender' ? 'ring-cyan-500' : 'ring-slate-500'}`
-                        : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
-                      }`}
+                    className={`relative group flex flex-col items-center text-center p-6 rounded-2xl border transition-all duration-300 ${
+                      selectedRole === role.id
+                        ? `bg-slate-800/80 ${role.border} ${role.shadow} ring-2 ring-offset-4 ring-offset-slate-900 ring-opacity-50 ${role.id === "Critic" ? "ring-red-500" : role.id === "Defender" ? "ring-cyan-500" : "ring-slate-500"}`
+                        : "bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40"
+                    }`}
                   >
-                    <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${role.color} flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                    <div
+                      className={`h-12 w-12 rounded-xl bg-gradient-to-br ${role.color} flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300`}
+                    >
                       <role.icon className="h-6 w-6 text-white" />
                     </div>
-                    <h3 className="text-lg font-bold text-slate-100 mb-1">{role.name}</h3>
+                    <h3 className="text-lg font-bold text-slate-100 mb-1">
+                      {role.name}
+                    </h3>
                     <p className="text-xs text-slate-500 group-hover:text-slate-400 transition-colors uppercase tracking-wider font-semibold">
                       {role.desc}
                     </p>
 
                     {selectedRole === role.id && (
-                      <div className={`absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gradient-to-r ${role.color} flex items-center justify-center shadow-lg border-2 border-slate-900`}>
+                      <div
+                        className={`absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gradient-to-r ${role.color} flex items-center justify-center shadow-lg border-2 border-slate-900`}
+                      >
                         <ArrowRight className="h-3 w-3 text-white" />
                       </div>
                     )}
@@ -355,31 +419,44 @@ const Lobby = ({ socket, user }) => {
               </div>
 
               <div className="flex flex-col items-center gap-6 pt-4">
-                {isPaired && myRole === 'joiner' && !!arenaId ? (
+                {isPaired && myRole === "joiner" && !!arenaId ? (
                   <div className="w-full sm:w-80 flex flex-col items-center justify-center gap-2 bg-slate-800/80 text-slate-400 px-6 py-4 rounded-2xl border border-slate-700">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-2 rounded-full bg-indigo-500 animate-ping" />
-                      <span className="text-sm font-bold uppercase tracking-widest">Awaiting Creator</span>
+                      <span className="text-sm font-bold uppercase tracking-widest">
+                        Awaiting Creator
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-500 text-center">Only the arena creator can start the debate</span>
+                    <span className="text-xs text-slate-500 text-center">
+                      Only the arena creator can start the debate
+                    </span>
                   </div>
                 ) : (
                   <button
                     onClick={handleStartMatchmaking}
                     className="group relative w-full sm:w-80 flex items-center justify-center gap-3 bg-white text-slate-950 text-xl font-black px-10 py-5 rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_50px_rgba(255,255,255,0.4)] overflow-hidden"
                   >
-                    <div className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${selectedRole === 'Critic' ? 'from-red-500 to-rose-600' :
-                        selectedRole === 'Defender' ? 'from-cyan-500 to-blue-600' :
-                          'from-slate-400 to-slate-500'
-                      }`} />
-                    <span>{isPaired ? 'Start Debate' : 'Enter Arena'}</span>
+                    <div
+                      className={`absolute inset-0 bg-gradient-to-r opacity-0 group-hover:opacity-10 transition-opacity duration-300 ${
+                        selectedRole === "Critic"
+                          ? "from-red-500 to-rose-600"
+                          : selectedRole === "Defender"
+                            ? "from-cyan-500 to-blue-600"
+                            : "from-slate-400 to-slate-500"
+                      }`}
+                    />
+                    <span>{isPaired ? "Start Debate" : "Enter Arena"}</span>
                     <Swords className="h-6 w-6 group-hover:rotate-12 transition-transform" />
                   </button>
                 )}
 
                 {!isPaired && (
                   <button
-                    onClick={() => navigate(`/practice?${new URLSearchParams({ mode: 'sparring', topic: topic.title, stance: selectedRole === 'Critic' ? 'against' : 'for' }).toString()}`)}
+                    onClick={() =>
+                      navigate(
+                        `/practice?${new URLSearchParams({ mode: "sparring", topic: topic.title, stance: selectedRole === "Critic" ? "against" : "for" }).toString()}`,
+                      )
+                    }
                     className="w-full sm:w-80 flex items-center justify-center gap-2 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 px-6 py-3 rounded-xl border border-violet-500/30 transition-all text-sm font-bold"
                   >
                     <Bot className="h-4 w-4" />
@@ -388,7 +465,7 @@ const Lobby = ({ socket, user }) => {
                 )}
 
                 <button
-                  onClick={() => navigate('/explore')}
+                  onClick={() => navigate("/explore")}
                   className="text-slate-500 hover:text-slate-300 transition-all text-sm font-bold uppercase tracking-widest flex items-center gap-2 px-4 py-2"
                 >
                   <ArrowRight className="h-4 w-4 rotate-180" />
@@ -410,14 +487,21 @@ const Lobby = ({ socket, user }) => {
 
               <div className="text-center space-y-4">
                 <div className="flex items-center justify-center gap-3">
-                  <div className={`h-3 w-3 rounded-full animate-ping ${selectedRole === 'Critic' ? 'bg-red-500' : selectedRole === 'Defender' ? 'bg-cyan-500' : 'bg-slate-400'}`} />
+                  <div
+                    className={`h-3 w-3 rounded-full animate-ping ${selectedRole === "Critic" ? "bg-red-500" : selectedRole === "Defender" ? "bg-cyan-500" : "bg-slate-400"}`}
+                  />
                   <span className="text-2xl font-black text-slate-100 uppercase tracking-tighter">
-                    {isPaired ? 'Starting Debate...' : 'Summoning Challenger...'}
+                    {isPaired
+                      ? "Starting Debate..."
+                      : "Summoning Challenger..."}
                   </span>
                 </div>
                 <div className="flex flex-col items-center gap-2">
                   <p className="text-slate-400 flex items-center gap-2 italic">
-                    Preferred Stance: <span className="text-slate-200 non-italic font-bold tracking-widest">{selectedRole}</span>
+                    Preferred Stance:{" "}
+                    <span className="text-slate-200 non-italic font-bold tracking-widest">
+                      {selectedRole}
+                    </span>
                   </p>
                   {!isPaired && (
                     <div className="bg-slate-950/50 border border-slate-800 px-4 py-2 rounded-lg flex items-center gap-2 text-xs text-slate-500">

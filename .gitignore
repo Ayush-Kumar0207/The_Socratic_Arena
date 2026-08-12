@@ -12,3 +12,5 @@ frontend/run_build.bat
 tmp
 tmp/
 backend/tmp/
+frontend/test-results/
+frontend/playwright-report/

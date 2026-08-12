@@ -12,15 +12,33 @@ services:
       ENABLE_ADVANCED_AI: ${ENABLE_ADVANCED_AI:-false}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+      CREDENTIAL_SIGNING_SECRET: ${CREDENTIAL_SIGNING_SECRET}
+      REDIS_URL: redis://redis:6379
+      MAX_PDF_UPLOAD_BYTES: ${MAX_PDF_UPLOAD_BYTES:-10485760}
     ports:
       - "5000:5000"
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - arena-redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   frontend:
     build:
@@ -35,3 +53,6 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  arena-redis:

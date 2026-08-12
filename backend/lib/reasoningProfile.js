@@ -143,7 +143,10 @@ export const computeReasoningProfile = (matches = [], userId, previous = null) =
   const overall = Math.round(mean(Object.values(metrics)));
   const matchCount = Math.max(performances.length, Number(previous?.match_count) || 0);
   const confidence = Math.round(clamp(36 + matchCount * 5.5, 36, 96));
-  const percentile = Math.round(clamp(50 + (overall - 62) * 1.45, 8, 99));
+  // Percentile is populated by the service after comparing this score with
+  // the stored cohort distribution. Never infer a population rank from the
+  // user's score alone.
+  const percentile = Number.isFinite(Number(previous?.percentile)) ? Number(previous.percentile) : null;
   const recent = performances.slice(0, 3);
   const older = performances.slice(3, 6);
   const recentAverage = recent.length ? mean(recent.flatMap(p => REASONING_METRICS.map(m => readMetric(p, m)))) : overall / 10;

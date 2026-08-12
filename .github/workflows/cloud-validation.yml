@@ -23,9 +23,7 @@ jobs:
             backend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      # BrowserRouter-only SPA: the remaining React Router advisory applies to
-      # server/RSC action handling, which this application does not use.
-      - run: npm audit --omit=dev --audit-level=critical
+      - run: npm audit --omit=dev --audit-level=high
         working-directory: frontend
       - run: npm run lint -- --max-warnings=0
         working-directory: frontend
@@ -39,8 +37,28 @@ jobs:
         working-directory: backend
       - run: npm audit --omit=dev --audit-level=high
         working-directory: backend
-      - run: find . -path './node_modules' -prune -o -name '*.js' -print0 | xargs -0 -n1 node --check
+      - run: npm test
         working-directory: backend
+      - run: npm run benchmark:judge:dry
+        working-directory: backend
+      - run: find . -path './node_modules' -prune -o \( -name '*.js' -o -name '*.mjs' \) -print0 | xargs -0 -n1 node --check
+        working-directory: backend
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
 
   containers:
     runs-on: ubuntu-latest

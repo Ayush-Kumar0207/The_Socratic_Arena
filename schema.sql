@@ -246,3 +246,44 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ==========================================
+-- LEVEL 6: REPRODUCIBLE CORE ROW SECURITY
+-- ==========================================
+-- These policies are part of the base schema so a fresh environment is never
+-- dependent on undocumented Supabase dashboard configuration. Backend writes
+-- use the service role; browsers receive only the minimum direct access needed
+-- for public discovery and user-owned follows/notifications.
+
+alter table public.profiles enable row level security;
+alter table public.user_follows enable row level security;
+alter table public.topics enable row level security;
+alter table public.matches enable row level security;
+alter table public.topic_follows enable row level security;
+alter table public.user_followed_topics enable row level security;
+alter table public.votes enable row level security;
+alter table public.challenges enable row level security;
+alter table public.private_arenas enable row level security;
+alter table public.notifications enable row level security;
+
+create policy "Profiles are readable" on public.profiles for select using (true);
+create policy "Users update own profile" on public.profiles for update using (id = auth.uid()) with check (id = auth.uid());
+create policy "Follows are readable" on public.user_follows for select using (true);
+create policy "Users create own follows" on public.user_follows for insert with check (follower_id = auth.uid());
+create policy "Users delete own follows" on public.user_follows for delete using (follower_id = auth.uid());
+create policy "Topics are readable" on public.topics for select using (true);
+create policy "Authenticated users create topics" on public.topics for insert with check (auth.uid() is not null and (created_by is null or created_by = auth.uid()));
+create policy "Public debate matches" on public.matches for select using (status in ('active','pending_votes','completed','abandoned'));
+create policy "Topic follows are readable" on public.topic_follows for select using (true);
+create policy "Users create own topic follows" on public.topic_follows for insert with check (user_id = auth.uid());
+create policy "Users delete own topic follows" on public.topic_follows for delete using (user_id = auth.uid());
+create policy "Followed topics are readable" on public.user_followed_topics for select using (true);
+create policy "Users manage own followed topics" on public.user_followed_topics for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Users read own votes" on public.votes for select using (voter_id = auth.uid());
+create policy "Challenge participants read" on public.challenges for select using (auth.uid() in (challenger_id, challenged_id));
+create policy "Private arena participants read" on public.private_arenas for select using (auth.uid() in (creator_id, joiner_id));
+create policy "Users read own notifications" on public.notifications for select using (user_id = auth.uid());
+create policy "Users update own notifications" on public.notifications for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "Users delete own notifications" on public.notifications for delete using (user_id = auth.uid());
+
+revoke insert, update, delete on public.matches, public.votes from anon, authenticated;

@@ -73,6 +73,17 @@ export const handleDebateUpload = async (req, res) => {
       return;
     }
 
+    const io = req.app.get('io');
+    const room = socketId.trim();
+    const targetSockets = await io.in(room).fetchSockets();
+    if (!targetSockets.some(socket => socket.id === room && socket.verifiedUserId === req.user?.id)) {
+      res.status(403).json({
+        success: false,
+        message: 'The debate stream must target your authenticated socket.',
+      });
+      return;
+    }
+
     // Return immediately so HTTP request does not time out.
     res.status(202).json({
       success: true,
@@ -82,9 +93,7 @@ export const handleDebateUpload = async (req, res) => {
     // 3) Extract in-memory PDF buffer from multer.
     // We use memory storage so we can directly parse bytes without saving temporary files.
     const pdfBuffer = req.file.buffer;
-    const io = req.app.get('io');
     const cancelledDebates = req.app.get('cancelledDebates');
-    const room = socketId.trim();
     const rounds = Number.parseInt(totalRounds, 10) || 3;
     cancelledDebates?.delete(room);
 
