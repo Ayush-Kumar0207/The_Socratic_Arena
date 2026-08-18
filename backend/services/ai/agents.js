@@ -31,6 +31,12 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 
 // Output parser converts model messages into plain string output.
 import { StringOutputParser } from '@langchain/core/output_parsers';
+import {
+  createStructuredActorOutput,
+  formatEvidenceForPrompt,
+  normalizeRetrievedEvidence,
+} from './evidence.js';
+import { persistSupabaseKnowledgeBase } from './supabaseVectorStore.js';
 
 /**
  * Rate-limit helpers
@@ -68,7 +74,7 @@ const isRateLimitError = (error) => {
  * @returns {Promise<{ retriever: import('@langchain/core/retrievers').BaseRetrieverInterface, vectorStore: MemoryVectorStore }>} retriever + store.
  * @throws {Error} If embeddings or vector store initialization fails.
  */
-export const createKnowledgeBase = async (chunks) => {
+export const createKnowledgeBase = async (chunks, options = {}) => {
   try {
     // Validate input chunks early.
     if (!Array.isArray(chunks) || chunks.length === 0) {
@@ -104,6 +110,29 @@ export const createKnowledgeBase = async (chunks) => {
       maxRetries: 0,
     });
 
+    const topK = Math.max(1, Math.min(Number(process.env.RETRIEVER_TOP_K) || 4, 8));
+    const requestedBackend = `${process.env.RAG_VECTOR_BACKEND || 'memory'}`.trim().toLowerCase();
+
+    if (requestedBackend === 'supabase' && options.supabase && options.userId) {
+      try {
+        return await persistSupabaseKnowledgeBase({
+          supabase: options.supabase,
+          userId: options.userId,
+          filename: options.filename || 'uploaded-document.pdf',
+          topic: options.topic || '',
+          documents,
+          embeddings,
+          batchSize: EMBEDDING_BATCH_SIZE,
+          delay: () => delay(EMBEDDING_BATCH_DELAY_MS),
+          topK,
+        });
+      } catch (error) {
+        // A missing migration or unavailable Supabase project must not take down
+        // Evidence Arena. The existing in-memory vector path remains functional.
+        console.warn('[Evidence Arena] Supabase vector backend unavailable; using memory:', error.message);
+      }
+    }
+
     // Build vector store incrementally in small batches with strict pacing.
     const vectorStore = new MemoryVectorStore(embeddings);
 
@@ -119,10 +148,16 @@ export const createKnowledgeBase = async (chunks) => {
 
     // Expose retriever abstraction for downstream agent calls.
     const retriever = vectorStore.asRetriever({
-      k: Number(process.env.RETRIEVER_TOP_K) || 4,
+      k: topK,
     });
 
-    return { retriever, vectorStore };
+    return {
+      retriever,
+      vectorStore,
+      vectorBackend: 'memory',
+      documentId: null,
+      fallbackFrom: requestedBackend === 'supabase' ? 'supabase' : null,
+    };
   } catch (error) {
     if (isRateLimitError(error)) {
       throw new Error('RATE_LIMIT_EMBEDDINGS: Google embedding RPM limit reached while indexing.');
@@ -140,19 +175,6 @@ export const createKnowledgeBase = async (chunks) => {
  * @param {Document[]} documents - Retrieved document chunks.
  * @returns {string} Human-readable evidence text for model context.
  */
-const formatRetrievedEvidence = (documents) => {
-  if (!Array.isArray(documents) || documents.length === 0) {
-    return 'No document evidence retrieved for this turn.';
-  }
-
-  return documents
-    .map((doc, idx) => {
-      const chunkLabel = doc?.metadata?.chunkIndex ?? idx;
-      return `Evidence ${idx + 1} (chunk ${chunkLabel}):\n${doc.pageContent}`;
-    })
-    .join('\n\n');
-};
-
 /**
  * Helper: createPersonaChain
  * ---------------------------------------------------------------------------
@@ -184,6 +206,8 @@ const createPersonaChain = (model, systemPrompt) => {
         '',
         'Instructions:',
         '- Build your argument using only supported claims from retrieved evidence.',
+        '- Cite supporting snippets using only their exact bracketed IDs, for example [E3].',
+        '- Never create an evidence ID that is not present in the retrieved evidence block.',
         '- Quote or closely reference exact facts whenever possible.',
         '- Keep tone professional and analytical.',
       ].join('\n'),
@@ -206,8 +230,8 @@ const createPersonaChain = (model, systemPrompt) => {
  * Creates two role-specialized agents that can retrieve evidence and respond.
  *
  * Output contract:
- * - defender.respond({ topic, priorContext? }) => string
- * - critic.respond({ topic, priorContext? }) => string
+ * - defender.respond({ topic, priorContext? }) => { text, evidence, citedEvidenceIds, invalidCitationIds }
+ * - critic.respond({ topic, priorContext? }) => { text, evidence, citedEvidenceIds, invalidCitationIds }
  *
  * Each response step does:
  * 1) Retrieve relevant chunks from the vector store.
@@ -267,7 +291,8 @@ export const createAgents = async (retriever) => {
 
           // Retrieve relevant evidence snippets for the requested topic.
           const retrievedDocs = await retriever.invoke(topic);
-          const evidence = formatRetrievedEvidence(retrievedDocs);
+          const retrievedEvidence = normalizeRetrievedEvidence(retrievedDocs);
+          const evidence = formatEvidenceForPrompt(retrievedEvidence);
 
           // Generate persona-specific response.
           const response = await personaChain.invoke({
@@ -280,7 +305,7 @@ export const createAgents = async (retriever) => {
             throw new Error('Model returned an invalid response payload.');
           }
 
-          return response.trim();
+          return createStructuredActorOutput(response, retrievedDocs);
         } catch (error) {
           if (isRateLimitError(error)) {
             throw new Error('RATE_LIMIT_CHAT: Google chat RPM limit reached during debate turn.');

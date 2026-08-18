@@ -136,6 +136,19 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 
 Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
 
+### 📚 Evidence-Grounded AI
+- **PDF ingestion and LangChain chunking** feed Gemini embeddings without retaining the uploaded raw PDF.
+- **Document-scoped semantic retrieval** uses Supabase PostgreSQL + pgvector when configured, with a safe in-memory fallback.
+- **Critic and Defender RAG agents** stream evidence-linked arguments over Socket.IO using stable, validated evidence IDs.
+- **Grounding scorecard** combines deterministic citation validation with one final semantic evaluator call; Evidence Arena never changes Elo.
+- Setup and retention details: [`docs/EVIDENCE_ARENA_SETUP.md`](docs/EVIDENCE_ARENA_SETUP.md).
+
+### 🔊 Voice AI Pipeline
+- Existing `faster-whisper` speech-to-text remains available for user speech.
+- AI responses in Evidence Arena and Practice Arena can be synthesized by **Amazon Polly** through the server-side AWS SDK v3 client.
+- The authenticated, rate-limited TTS API returns in-memory MP3 audio; AWS credentials never enter the React bundle.
+- Manual IAM and deployment setup: [`docs/AWS_POLLY_SETUP.md`](docs/AWS_POLLY_SETUP.md).
+
 ### 🎯 Core Debate Engine
 - **Real-time 1v1 debates** via WebSocket with server-authoritative turn management.
 - **Dynamic Stance Mapping** — Automatically parses debate topics (e.g., "Veg vs Non-Veg") to generate tailored, context-aware mission objectives for each role.
@@ -208,7 +221,8 @@ Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
 | **Backend** | Node.js, Express 4 | REST API + Socket.IO server |
 | **AI Engine** | Google Gemini 2.5 Flash | Debate evaluation, topic classification, semantic analysis |
 | **AI Framework** | LangChain + Google GenAI | Structured AI chains, embeddings, semantic search |
-| **Database** | Supabase (PostgreSQL) | Auth, profiles, matches, topics, votes, real-time subscriptions |
+| **Database** | Supabase (PostgreSQL + optional pgvector) | Auth, product data, and document-scoped persistent RAG vectors |
+| **Voice AI** | faster-whisper + Amazon Polly (AWS SDK v3) | Speech-to-text and authenticated server-side MP3 synthesis |
 | **Auth** | Supabase Auth | OAuth / email authentication |
 | **Export Tools** | html2canvas | UI snapshots and visual state capture |
 | **Routing** | React Router DOM v7 | Client-side navigation with protected routes |
@@ -262,6 +276,31 @@ Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
                     │  topic_follows │ private_arenas │
                     └───────────────────────────┘
 ```
+
+### Evidence and voice architecture
+
+```mermaid
+flowchart TD
+    PDF["PDF in memory"] --> MULTER["Express + Multer"]
+    MULTER --> PARSE["pdf-parse"]
+    PARSE --> CHUNK["LangChain chunker"]
+    CHUNK --> EMBED["Gemini embeddings"]
+    EMBED --> VECTOR["Supabase PostgreSQL + pgvector"]
+    EMBED -. "configuration or service unavailable" .-> MEMORY["In-memory vector fallback"]
+    VECTOR --> RETRIEVE["Document-scoped semantic retrieval"]
+    MEMORY --> RETRIEVE
+    RETRIEVE --> AGENTS["Critic + Defender RAG agents"]
+    AGENTS --> EVIDENCE["Grounded arguments + validated evidence IDs"]
+    EVIDENCE --> EVAL["Citation checks + grounding evaluator"]
+    EVAL --> SOCKET["Socket.IO stream"]
+    SOCKET --> REACT["React Evidence Arena"]
+    REACT --> TTSAPI["Authenticated backend TTS API"]
+    TTSAPI --> AWS["AWS SDK v3"]
+    AWS --> POLLY["Amazon Polly"]
+    POLLY --> MP3["In-memory MP3 playback"]
+```
+
+Voice interaction can form the end-to-end path `faster-whisper STT → LLM reasoning → Amazon Polly TTS` when both optional speech services are configured.
 
 ---
 
@@ -326,6 +365,19 @@ GEMINI_API_KEY=your-gemini-api-key
 
 # Feature Flags
 ENABLE_ADVANCED_AI=true    # Toggle AI evaluation (set false to reduce API costs)
+
+# Evidence Arena (memory is the zero-migration default)
+RAG_VECTOR_BACKEND=memory
+RETRIEVER_TOP_K=4
+
+# Server-side Amazon Polly (see docs/AWS_POLLY_SETUP.md)
+TTS_ENABLED=false
+AWS_REGION=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_SESSION_TOKEN=
+POLLY_VOICE_ID=Joanna
+POLLY_ENGINE=standard
 ```
 
 Create a `.env` or update the Supabase config in `frontend/src/lib/supabaseClient.js` with your project's public anon key and URL.
@@ -369,7 +421,7 @@ cd frontend && npm install && npm run dev
 
 1. Create a new project on [Supabase](https://supabase.com)
 2. Run `schema.sql` in the Supabase SQL Editor to create tables
-3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/006_final_integrity.sql` in numeric order (existing deployments can apply only unapplied migrations)
+3. Apply `backend/migrations/001_create_private_arenas.sql` through `backend/migrations/007_evidence_arena.sql` in numeric order (existing deployments can apply only unapplied migrations)
 4. Review the included Row Level Security policies for your organization’s privacy requirements
 5. Copy your project URL and service key into `backend/.env`
 

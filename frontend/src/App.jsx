@@ -27,6 +27,7 @@ const MatchReview = lazy(() => import("./components/MatchReview"));
 const TopicMatches = lazy(() => import("./components/TopicMatches"));
 const ArenaOS = lazy(() => import("./components/ArenaOS"));
 const PracticeArena = lazy(() => import("./components/PracticeArena"));
+const EvidenceArena = lazy(() => import("./components/EvidenceArena"));
 const TournamentBracket = lazy(() => import("./components/TournamentBracket"));
 const TeamArena = lazy(() => import("./components/TeamArena"));
 const CredentialVerify = lazy(() => import("./components/CredentialVerify"));
@@ -402,6 +403,18 @@ const App = () => {
               session ? (
                 <ErrorBoundary>
                   <PracticeArena user={session.user} />
+                </ErrorBoundary>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/evidence-arena"
+            element={
+              session ? (
+                <ErrorBoundary>
+                  <EvidenceArena user={session.user} socket={socket} />
                 </ErrorBoundary>
               ) : (
                 <Navigate to="/" replace />

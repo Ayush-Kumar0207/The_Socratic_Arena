@@ -22,6 +22,7 @@ import {
   ClipboardCheck,
   Clock3,
   Crown,
+  FileSearch,
   Flag,
   GraduationCap,
   LayoutGrid,
@@ -441,6 +442,7 @@ const ArenaOS = ({ user }) => {
                 strongest={strongest}
                 focus={focus}
                 busy={busy}
+                navigate={navigate}
                 startPractice={startPractice}
                 completeDrill={() =>
                   act(
@@ -813,6 +815,7 @@ const CoachTab = ({
   strongest,
   focus,
   busy,
+  navigate,
   startPractice,
   completeDrill,
 }) => (
@@ -920,6 +923,18 @@ const CoachTab = ({
           >
             <Bot className="h-4 w-4" /> Apply it against AI
           </button>
+        </div>
+      </Card>
+
+      <Card className="relative overflow-hidden border-cyan-500/20 p-6">
+        <div className="absolute -right-12 -top-12 h-36 w-36 rounded-full bg-cyan-500/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-cyan-400"><FileSearch className="h-4 w-4" /> Evidence Arena</div>
+            <h2 className="mt-2 text-xl font-black text-white">Cross-examine a source, not a vague prompt</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">Upload a PDF and watch Critic and Defender retrieve, cite, and evaluate evidence without changing your competitive Elo.</p>
+          </div>
+          <button onClick={() => navigate('/evidence-arena')} className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-500 px-5 py-3 text-sm font-black text-slate-950"><BookOpen className="h-4 w-4" /> Open Evidence Arena <ArrowRight className="h-4 w-4" /></button>
         </div>
       </Card>
 

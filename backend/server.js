@@ -847,8 +847,8 @@ console.log(`[Realtime] ${realtimeCoordinator.enabled ? 'Redis distributed coord
 
 // Make io available in controllers via req.app.get('io').
 app.set('io', io);
-const cancelledDebates = new Set();
-app.set('cancelledDebates', cancelledDebates);
+const evidenceDebateSessions = new Map();
+app.set('evidenceDebateSessions', evidenceDebateSessions);
 
 /**
  * User-Socket Map for Targeted Real-Time Delivery
@@ -1436,6 +1436,7 @@ io.use(async (socket, next) => {
   }
   if (isSwarmTestToken(token)) {
     socket.verifiedUserId = makeSwarmUserId(socket);
+    socket.data.userId = socket.verifiedUserId;
     socket.isSyntheticSwarmBot = true;
     socket.swarmBotId = socket.handshake.auth?.botId || socket.id;
     return next();
@@ -1446,6 +1447,7 @@ io.use(async (socket, next) => {
       return next(new Error('Authentication Error: Invalid or expired token.'));
     }
     socket.verifiedUserId = user.id;
+    socket.data.userId = user.id;
 
     const now = new Date().toISOString();
     const { data: restriction, error: restrictionError } = await supabase
@@ -3124,6 +3126,10 @@ Respond STRICTLY with a valid JSON object and nothing else: {"found": true/false
     console.log(`[socket] Client disconnected: ${socket.id} | reason: ${reason}`);
     recordSocketConnection(-1);
     recordMatchEvent('socket_disconnect');
+
+    for (const session of evidenceDebateSessions.values()) {
+      if (session.socketId === socket.id) session.cancelled = true;
+    }
 
     // Remove user from socket map
     if (socket.verifiedUserId) {

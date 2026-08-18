@@ -23,6 +23,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-polly": "^3.1112.0",
     "@google/generative-ai": "^0.24.1",
     "@langchain/core": "^0.3.19",
     "@langchain/google-genai": "^0.1.7",

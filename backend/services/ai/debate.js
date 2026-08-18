@@ -4,6 +4,7 @@
  * Debate orchestration with strict pacing for Gemini free-tier rate limits.
  * -----------------------------------------------------------------------------
  */
+import { normalizeActorOutput } from './evidence.js';
 
 /**
  * Helper: invokeActor
@@ -21,11 +22,12 @@ const invokeActor = async (actor, topic, priorContext) => {
       ? await actor.respond(payload)
       : await actor.invoke(payload);
 
-  if (!rawOutput || typeof rawOutput !== 'string' || !rawOutput.trim()) {
+  const normalized = normalizeActorOutput(rawOutput);
+  if (!normalized.text) {
     throw new Error('Actor returned an empty or invalid response.');
   }
 
-  return rawOutput.trim();
+  return normalized;
 };
 
 /**
@@ -102,9 +104,9 @@ export const runDebate = async (
           ? `Round ${roundNumber}: Analyze this topic and open with a strong critique, identifying key flaws.\n\nTopic:\n${criticPrompt}\n\n${strictStyleRules}`
           : `Round ${roundNumber}: Attack the Defender's previous argument and expose weaknesses.\n\nDefender's last point:\n${criticPrompt}\n\n${strictStyleRules}`;
 
-      const criticText = await invokeActor(criticChain, criticInstruction, priorContextForCritic);
+      const criticOutput = await invokeActor(criticChain, criticInstruction, priorContextForCritic);
 
-      const criticTurn = { speaker: 'Critic', text: criticText };
+      const criticTurn = { speaker: 'Critic', round: roundNumber, ...criticOutput };
       debateTranscript.push(criticTurn);
       if (typeof onTurn === 'function') onTurn(criticTurn);
 
@@ -115,19 +117,19 @@ export const runDebate = async (
         .map((turn) => `${turn.speaker}: ${turn.text}`)
         .join('\n');
 
-      const defenderInstruction = `Round ${roundNumber}: Defend the document against the Critic's latest argument.\n\nCritic's claim:\n${criticText}\n\n${strictStyleRules}`;
-      const defenderText = await invokeActor(
+      const defenderInstruction = `Round ${roundNumber}: Defend the document against the Critic's latest argument.\n\nCritic's claim:\n${criticOutput.text}\n\n${strictStyleRules}`;
+      const defenderOutput = await invokeActor(
         defenderChain,
         defenderInstruction,
         priorContextForDefender,
       );
 
-      const defenderTurn = { speaker: 'Defender', text: defenderText };
+      const defenderTurn = { speaker: 'Defender', round: roundNumber, ...defenderOutput };
       debateTranscript.push(defenderTurn);
       if (typeof onTurn === 'function') onTurn(defenderTurn);
 
-      await cancellableDelay(6500, shouldCancel);
-      criticPrompt = defenderText;
+      if (roundNumber < rounds) await cancellableDelay(6500, shouldCancel);
+      criticPrompt = defenderOutput.text;
     }
 
     return debateTranscript;

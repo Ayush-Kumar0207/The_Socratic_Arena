@@ -1,8 +1,10 @@
 import express from 'express';
 import multer from 'multer';
-import { handleDebateUpload } from '../controllers/documentCtrl.js';
+import { createHandleDebateUpload } from '../controllers/documentCtrl.js';
 import { createRateLimit } from '../lib/rateLimit.js';
 import { freeSttConfig, getFreeSttStatus, transcribeAudioBuffer } from '../services/freeSttClient.js';
+import { assertEvidenceDocumentOwnership } from '../services/ai/supabaseVectorStore.js';
+import { createPollyService, validateTtsText } from '../services/tts/pollyService.js';
 
 const memoryStorage = multer.memoryStorage();
 const pdfLimit = Math.min(Number(process.env.MAX_PDF_UPLOAD_BYTES) || 10 * 1024 * 1024, 25 * 1024 * 1024);
@@ -25,22 +27,24 @@ const sttUpload = multer({
   },
 });
 
-export default function createApiRoutes({ supabase }) {
-  const router = express.Router();
+export const createAuthenticateMiddleware = (supabase) => async (req, res, next) => {
+  const token = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return res.status(401).json({ success: false, message: 'Authentication required' });
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) return res.status(401).json({ success: false, message: 'Session expired' });
+    req.user = data.user;
+    req.accessToken = token;
+    return next();
+  } catch {
+    return res.status(401).json({ success: false, message: 'Unable to verify session' });
+  }
+};
 
-  const authenticate = async (req, res, next) => {
-    const token = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
-    if (!token) return res.status(401).json({ success: false, message: 'Authentication required' });
-    try {
-      const { data, error } = await supabase.auth.getUser(token);
-      if (error || !data?.user) return res.status(401).json({ success: false, message: 'Session expired' });
-      req.user = data.user;
-      req.accessToken = token;
-      return next();
-    } catch {
-      return res.status(401).json({ success: false, message: 'Unable to verify session' });
-    }
-  };
+export default function createApiRoutes({ supabase, ttsService = createPollyService() }) {
+  const router = express.Router();
+  const authenticate = createAuthenticateMiddleware(supabase);
+  const handleDebateUpload = createHandleDebateUpload({ supabase });
 
   router.get('/stt/status', authenticate, createRateLimit({ name: 'stt-status', max: 30 }), async (_req, res) => {
     const status = await getFreeSttStatus();
@@ -54,6 +58,83 @@ export default function createApiRoutes({ supabase }) {
     createRateLimit({ name: 'pdf-debate-ip', max: 8, windowMs: 10 * 60_000, key: req => req.ip }),
     upload.single('document'),
     handleDebateUpload,
+  );
+
+  router.post(
+    '/debate/cancel',
+    authenticate,
+    createRateLimit({ name: 'pdf-debate-cancel', max: 10, windowMs: 10 * 60_000 }),
+    (req, res) => {
+      const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId.trim() : '';
+      const socketId = typeof req.body?.socketId === 'string' ? req.body.socketId.trim() : '';
+      if (!sessionId || !socketId) {
+        return res.status(400).json({ success: false, message: 'sessionId and socketId are required.' });
+      }
+      const session = req.app.get('evidenceDebateSessions')?.get(sessionId);
+      if (!session) return res.status(404).json({ success: false, message: 'The session is no longer active.' });
+      if (session.userId !== req.user.id || session.socketId !== socketId) {
+        return res.status(403).json({ success: false, message: 'You do not own this Evidence Arena session.' });
+      }
+      session.cancelled = true;
+      return res.json({ success: true, message: 'Stop requested.' });
+    },
+  );
+
+  router.delete(
+    '/evidence/documents/:documentId',
+    authenticate,
+    createRateLimit({ name: 'evidence-delete', max: 20, windowMs: 10 * 60_000 }),
+    async (req, res) => {
+      try {
+        const owned = await assertEvidenceDocumentOwnership(supabase, req.params.documentId, req.user.id);
+        if (!owned) return res.status(404).json({ success: false, message: 'Evidence document not found.' });
+        const { error } = await supabase
+          .from('evidence_documents')
+          .delete()
+          .eq('id', req.params.documentId)
+          .eq('user_id', req.user.id);
+        if (error) throw error;
+        return res.json({ success: true, message: 'Evidence document deleted.' });
+      } catch (error) {
+        console.error('[Evidence Arena] Document cleanup failed:', error.message);
+        return res.status(503).json({ success: false, message: 'Evidence storage is unavailable.' });
+      }
+    },
+  );
+
+  router.get(
+    '/tts/capabilities',
+    authenticate,
+    createRateLimit({ name: 'tts-capabilities', max: 30 }),
+    (_req, res) => res.json({ success: true, tts: ttsService.capabilities }),
+  );
+
+  router.post(
+    '/tts/synthesize',
+    authenticate,
+    createRateLimit({ name: 'tts-user', max: 20, windowMs: 10 * 60_000 }),
+    createRateLimit({ name: 'tts-ip', max: 50, windowMs: 10 * 60_000, key: req => req.ip }),
+    async (req, res) => {
+      try {
+        const text = validateTtsText(req.body?.text);
+        const audio = await ttsService.synthesize(text);
+        res.set({
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': String(audio.length),
+          'Cache-Control': 'private, no-store',
+        });
+        return res.status(200).send(audio);
+      } catch (error) {
+        const clientSafeMessage = error.statusCode < 500 || error.code === 'TTS_DISABLED'
+          ? error.message
+          : 'Voice synthesis is temporarily unavailable.';
+        return res.status(error.statusCode || 502).json({
+          success: false,
+          message: clientSafeMessage || 'Voice synthesis is unavailable.',
+          code: error.code || 'TTS_ERROR',
+        });
+      }
+    },
   );
 
   router.post(
