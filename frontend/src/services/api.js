@@ -11,9 +11,6 @@ import { supabase } from '../lib/supabaseClient';
 const api = axios.create({
   baseURL: (import.meta.env.VITE_BACKEND_URL ? `${import.meta.env.VITE_BACKEND_URL}/api` : 'http://localhost:5000/api'),
   timeout: 3000000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 // Arena OS endpoints are authenticated by the same Supabase session used by

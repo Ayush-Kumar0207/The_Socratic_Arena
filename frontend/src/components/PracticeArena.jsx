@@ -5,6 +5,8 @@ import {
   RotateCcw, Send, Share2, ShieldCheck, Sparkles, Target, Trophy,
 } from 'lucide-react';
 import api from '../services/api';
+import { usePollySpeech } from '../hooks/usePollySpeech';
+import PollyListenButton from './PollyListenButton';
 
 const labels = {
   logic: 'Logic', evidence: 'Evidence', rebuttal: 'Rebuttal', clarity: 'Clarity',
@@ -31,6 +33,7 @@ const PracticeArena = () => {
   const [elapsed, setElapsed] = useState(0);
   const startedAt = useRef(Date.now());
   const bottomRef = useRef(null);
+  const speech = usePollySpeech();
 
   useEffect(() => {
     if (result) return undefined;
@@ -71,6 +74,7 @@ const PracticeArena = () => {
   };
 
   const restart = () => {
+    speech.stop();
     setTranscript([{ role: 'opponent', text: opening, round: 0 }]); setMessage(''); setRound(1); setResult(null); setError(''); setElapsed(0); startedAt.current = Date.now();
   };
 
@@ -105,13 +109,13 @@ const PracticeArena = () => {
 
         <section className="flex min-h-[650px] flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40 lg:min-h-0">
           {!result ? <>
-            <header className="flex items-center justify-between border-b border-slate-800 px-5 py-4"><div><h2 className="font-black text-white">Reasoning room</h2><p className="text-xs text-slate-500">Round {Math.min(round, 4)} · you argue {stance}</p></div><div className="flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /><span className="text-xs font-bold text-emerald-400">Coach online</span></div></header>
+            <header className="flex items-center justify-between border-b border-slate-800 px-5 py-4"><div><h2 className="font-black text-white">Reasoning room</h2><p className="text-xs text-slate-500">Round {Math.min(round, 4)} · you argue {stance}</p></div><div className="text-right"><div className="flex items-center justify-end gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /><span className="text-xs font-bold text-emerald-400">Coach online</span></div>{speech.capabilities?.enabled && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">Voice output · Amazon Polly</p>}</div></header>
             <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
-              {transcript.map((turn, index) => <div key={`${turn.role}-${index}`} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[88%] rounded-2xl border p-4 sm:max-w-[72%] ${turn.role === 'user' ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-700 bg-slate-800/80'}`}><div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">{turn.role === 'user' ? <BrainCircuit className="h-3 w-3 text-cyan-400" /> : <Bot className="h-3 w-3 text-violet-400" />}{turn.role === 'user' ? 'You' : mode === 'simulation' ? 'Counterpart' : 'Socratic opponent'}{turn.round > 0 && <span>· Round {turn.round}</span>}</div><p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">{turn.text}</p></div></div>)}
+              {transcript.map((turn, index) => <div key={`${turn.role}-${index}`} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[88%] rounded-2xl border p-4 sm:max-w-[72%] ${turn.role === 'user' ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-700 bg-slate-800/80'}`}><div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">{turn.role === 'user' ? <BrainCircuit className="h-3 w-3 text-cyan-400" /> : <Bot className="h-3 w-3 text-violet-400" />}{turn.role === 'user' ? 'You' : mode === 'simulation' ? 'Counterpart' : 'Socratic opponent'}{turn.round > 0 && <span>· Round {turn.round}</span>}</div><p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">{turn.text}</p>{turn.role === 'opponent' && <PollyListenButton speech={speech} text={turn.text} speechId={`practice-${index}`} className="mt-3" />}</div></div>)}
               {busy && <div className="flex justify-start"><div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-violet-400" /> Constructing the strongest counterargument…</div></div>}
               <div ref={bottomRef} />
             </div>
-            {error && <div className="mx-4 mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</div>}
+            {(error || speech.error) && <div className="mx-4 mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error || speech.error}</div>}
             <div className="border-t border-slate-800 p-4">
               {canFinish && <button onClick={complete} className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-black text-slate-950"><Sparkles className="h-4 w-4" /> Finish and score this session</button>}
               <form onSubmit={sendTurn} className="flex gap-3"><textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendTurn(); } }} disabled={busy} rows="3" placeholder={userTurns >= 3 ? 'Add another round, or finish for your score…' : 'Answer the exact objection. Use evidence and state your confidence…'} className="min-h-[84px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50" /><button disabled={!message.trim() || busy} className="flex w-14 items-center justify-center rounded-xl bg-cyan-500 text-slate-950 disabled:opacity-40"><Send className="h-5 w-5" /></button></form>
