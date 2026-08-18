@@ -111,7 +111,9 @@ export const createKnowledgeBase = async (chunks, options = {}) => {
     });
 
     const topK = Math.max(1, Math.min(Number(process.env.RETRIEVER_TOP_K) || 4, 8));
-    const requestedBackend = `${process.env.RAG_VECTOR_BACKEND || 'memory'}`.trim().toLowerCase();
+    const requestedBackend = options.vaultCollectionId
+      ? 'supabase'
+      : `${process.env.RAG_VECTOR_BACKEND || 'memory'}`.trim().toLowerCase();
 
     if (requestedBackend === 'supabase' && options.supabase && options.userId) {
       try {
@@ -120,6 +122,8 @@ export const createKnowledgeBase = async (chunks, options = {}) => {
           userId: options.userId,
           filename: options.filename || 'uploaded-document.pdf',
           topic: options.topic || '',
+          vaultCollectionId: options.vaultCollectionId || null,
+          retainedUntil: options.retainedUntil || null,
           documents,
           embeddings,
           batchSize: EMBEDDING_BATCH_SIZE,
@@ -127,6 +131,7 @@ export const createKnowledgeBase = async (chunks, options = {}) => {
           topK,
         });
       } catch (error) {
+        if (options.vaultCollectionId) throw error;
         // A missing migration or unavailable Supabase project must not take down
         // Evidence Arena. The existing in-memory vector path remains functional.
         console.warn('[Evidence Arena] Supabase vector backend unavailable; using memory:', error.message);

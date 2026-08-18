@@ -5,6 +5,7 @@ import {
   ShieldCheck, Square, Trash2, WifiOff,
 } from 'lucide-react';
 import api from '../services/api';
+import { COMMERCIAL_UI_ENABLED } from '../lib/commercial';
 import { usePollySpeech } from '../hooks/usePollySpeech';
 import FileUploader from './FileUploader';
 import EvidenceTurn from './EvidenceTurn';
@@ -37,10 +38,19 @@ const EvidenceArena = ({ socket }) => {
   const [evaluation, setEvaluation] = useState(null);
   const [error, setError] = useState('');
   const [documentId, setDocumentId] = useState(null);
+  const [vaults, setVaults] = useState([]);
+  const [vaultCollectionId, setVaultCollectionId] = useState('');
   const [vectorBackend, setVectorBackend] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const sessionIdRef = useRef(null);
   const runningRef = useRef(false);
+
+  useEffect(() => {
+    if (!COMMERCIAL_UI_ENABLED) return;
+    api.get('/commercial/studio')
+      .then(({ data }) => setVaults(data.data?.vaults || []))
+      .catch(() => setVaults([]));
+  }, []);
 
   useEffect(() => {
     const belongsToCurrentSession = (payload) => payload?.sessionId === sessionIdRef.current;
@@ -120,6 +130,7 @@ const EvidenceArena = ({ socket }) => {
     form.append('totalRounds', String(rounds));
     form.append('socketId', socket.id);
     form.append('sessionId', sessionId);
+    if (vaultCollectionId) form.append('vaultCollectionId', vaultCollectionId);
     try {
       await api.post('/debate', form);
     } catch (requestError) {
@@ -178,6 +189,7 @@ const EvidenceArena = ({ socket }) => {
           <aside className="space-y-4">
             <FileUploader selectedFile={file} topic={topic} onFileSelect={selectFile} onTopicChange={setTopic} onClear={() => setFile(null)} disabled={active} maxBytes={MAX_PDF_BYTES} />
             <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><label htmlFor="evidence-rounds" className="text-xs font-black uppercase tracking-wider text-slate-500">Cross-examination rounds</label><div id="evidence-rounds" className="mt-3 grid grid-cols-3 gap-2">{[1, 2, 3].map((value) => <button key={value} type="button" disabled={active} onClick={() => setRounds(value)} className={`rounded-xl border py-2.5 text-sm font-black ${rounds === value ? 'border-cyan-500 bg-cyan-500 text-slate-950' : 'border-slate-700 text-slate-400 hover:border-slate-500'} disabled:opacity-50`}>{value}</button>)}</div><p className="mt-3 text-xs leading-5 text-slate-500">Each round uses one Critic and one Defender call. Default: 2.</p></section>
+            {vaults.length > 0 && <section className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-5"><label htmlFor="evidence-vault" className="text-xs font-black uppercase tracking-wider text-violet-300">Evidence Vault retention</label><select id="evidence-vault" value={vaultCollectionId} onChange={event => setVaultCollectionId(event.target.value)} disabled={active} className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm outline-none"><option value="">Session only</option>{vaults.map(vault => <option key={vault.id} value={vault.id}>{vault.name} · {vault.retention_days} days</option>)}</select><p className="mt-2 text-xs leading-5 text-slate-500">Choosing a collection persists private extracted chunks; raw PDFs are not retained.</p></section>}
             <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${socket.connected ? 'bg-emerald-400' : 'bg-rose-400'}`} /><span className="text-sm font-black text-white">{statusCopy[status]}</span></div><p className="mt-2 text-xs text-slate-500">{socket.connected ? 'Authenticated realtime stream connected.' : 'Realtime stream disconnected.'}</p>{active ? <button type="button" onClick={stop} disabled={status === 'cancelling'} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 py-3 text-sm font-black text-rose-300 disabled:opacity-50"><Square className="h-4 w-4 fill-current" /> Stop</button> : status === 'idle' ? <button type="button" onClick={start} disabled={!socket.connected} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 py-3 text-sm font-black text-slate-950 disabled:opacity-40"><FileSearch className="h-4 w-4" /> Start cross-examination</button> : <button type="button" onClick={reset} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 py-3 text-sm font-black text-slate-200"><RotateCcw className="h-4 w-4" /> Start another session</button>}</section>
             {documentId && !active && <button type="button" onClick={deleteEvidence} disabled={deleting} className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 py-3 text-xs font-bold text-slate-500 hover:border-rose-500/30 hover:text-rose-300 disabled:opacity-50">{deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete stored evidence</button>}
           </aside>

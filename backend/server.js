@@ -118,6 +118,8 @@ import { Server as SocketIOServer } from 'socket.io';
 // Import API routes so HTTP endpoints can be mounted under /api.
 import createApiRoutes from './routes/apiRoutes.js';
 import createProductRoutes from './routes/productRoutes.js';
+import createCommercialRoutes from './routes/commercialRoutes.js';
+import createCommercialWebhookRoutes from './routes/commercialWebhookRoutes.js';
 
 // Import Supabase client for database operations
 import { supabase } from './lib/supabaseClient.js';
@@ -134,6 +136,8 @@ import {
   rateLimitHealth,
 } from './lib/rateLimit.js';
 import { launchAiLimits, launchAllowanceMessages, launchLimitSummary } from './lib/launchLimits.js';
+import { commercialModeEnabled } from './lib/commercialConfig.js';
+import { createCommercialService } from './lib/commercialService.js';
 import {
   metricsHandler,
   observeHttpRequests,
@@ -154,6 +158,32 @@ if (!supabase) {
 } else {
   console.log('✅ Supabase client initialized successfully');
 }
+const commercialService = createCommercialService({ supabase });
+
+const cleanupExpiredEvidenceVault = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('evidence_documents')
+      .select('id')
+      .not('retained_until', 'is', null)
+      .lt('retained_until', new Date().toISOString())
+      .limit(500);
+    if (error) {
+      if (!/retained_until|schema cache|does not exist/i.test(error.message || '')) console.warn('[Evidence Vault] Retention scan failed:', error.message);
+      return;
+    }
+    const ids = (data || []).map(item => item.id);
+    if (!ids.length) return;
+    const { error: deleteError } = await supabase.from('evidence_documents').delete().in('id', ids);
+    if (deleteError) throw deleteError;
+    console.log(`[Evidence Vault] Deleted ${ids.length} expired private evidence document(s).`);
+  } catch (error) {
+    console.warn('[Evidence Vault] Retention cleanup skipped:', error.message);
+  }
+};
+
+const evidenceRetentionTimer = setInterval(cleanupExpiredEvidenceVault, 6 * 60 * 60_000);
+evidenceRetentionTimer.unref?.();
 
 /**
  * AI Debate Evaluation Engine
@@ -179,6 +209,24 @@ async function refreshReasoningProfiles(matchId) {
       profile.percentile_updated_at = new Date().toISOString();
       const { error: profileError } = await supabase.from('reasoning_profiles').upsert({ user_id: userId, ...profile });
       if (profileError && !profileError.message?.includes('reasoning_profiles')) console.warn('[Reasoning Profile] Update failed:', profileError.message);
+      if (commercialModeEnabled()) {
+        try {
+          const access = await commercialService.resolveAccess(userId);
+          if (access.entitlements.advanced_analytics) {
+            await supabase.from('reasoning_progress_snapshots').upsert({
+              user_id: userId,
+              source_match_id: matchId,
+              overall: profile.overall,
+              metrics: profile.metrics,
+              percentile: profile.percentile,
+              confidence: profile.confidence,
+              captured_at: new Date().toISOString(),
+            }, { onConflict: 'user_id,source_match_id' });
+          }
+        } catch (snapshotError) {
+          console.warn('[Reasoning Progress] Optional commercial snapshot skipped:', snapshotError.message);
+        }
+      }
     }));
   } catch (error) {
     // The core match must remain usable before migration 004 is installed.
@@ -534,6 +582,11 @@ const trustProxyHops = Math.max(
 );
 if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
 
+// Billing providers sign the exact raw bytes they send. This route must stay
+// ahead of express.json(); verified events update only the isolated commercial
+// subscription tables and cannot change public-beta match behavior.
+app.use('/api/commercial/webhooks', createCommercialWebhookRoutes({ supabase }));
+
 /**
  * Basic Middleware Configuration
  * ---------------------------------------------------------------------------
@@ -552,7 +605,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', CLIENT_ORIGIN);
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key');
 
   if (req.method === 'OPTIONS') {
     res.sendStatus(204);
@@ -655,6 +708,7 @@ app.use('/api', createRateLimit({
 }));
 app.use('/api', createApiRoutes({ supabase }));
 app.use('/api/product', createProductRoutes({ supabase, generateWithRetry, advancedAi: ENABLE_ADVANCED_AI }));
+app.use('/api/commercial', createCommercialRoutes({ supabase, generateWithRetry }));
 const authenticateHttp = async (req, res, next) => {
   const token = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
   if (!token) return res.status(401).json({ success: false, message: 'Authentication required' });
@@ -673,7 +727,7 @@ app.post(
     max: launchAiLimits.summariesPerUser,
     message: launchAllowanceMessages.summary,
     code: 'DAILY_AI_ALLOWANCE_REACHED',
-    skip: () => !ENABLE_ADVANCED_AI || !process.env.GEMINI_API_KEY,
+    skip: () => commercialModeEnabled() || !ENABLE_ADVANCED_AI || !process.env.GEMINI_API_KEY,
     onDecision: recordAiAllowance,
   }),
   createDailyAllowance({
@@ -708,7 +762,14 @@ app.post(
     const prompt = `You are a debate summarizer. Read the following debate transcript and provide a single, engaging 1-liner summary that captures the crux of the arguments exchanged. Do NOT wrap in quotes. Keep it under 100 characters.\n\nDebate:\n${debateText}`;
 
     // Use robust helper (expectJson = false)
-    let summary = await generateWithRetry(prompt, 3, false);
+    const metered = await commercialService.runMetered({
+      userId: req.user.id,
+      feature: 'ai_summary',
+      entitlement: 'ai_sparring',
+      requestKey: req.get('idempotency-key') || `summary:${id}`,
+      action: () => generateWithRetry(prompt, 3, false),
+    });
+    let summary = metered.result;
 
     // remove quotes if any
     summary = summary.replace(/^["']|["']$/g, '');
@@ -1937,7 +1998,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (process.env.GEMINI_API_KEY) {
+    if (process.env.GEMINI_API_KEY && !commercialModeEnabled()) {
       const allowance = await consumeSocketAiAllowance({
         userId: callerId,
         userFeature: 'ai-objection-user-daily',
@@ -1990,7 +2051,14 @@ io.on('connection', (socket) => {
 
       Return ONLY valid JSON: { "flagged": boolean, "type": "fallacy"|"fact"|null, "reason": string|null }`;
 
-      const aiResponse = await generateWithRetry(prompt, 3, true);
+      const metered = await commercialService.runMetered({
+        userId: callerId,
+        feature: 'ai_objection',
+        entitlement: 'ai_sparring',
+        requestKey: `objection:${roomId}:${targetMessageId}:${callerId}`,
+        action: () => generateWithRetry(prompt, 3, true),
+      });
+      const aiResponse = metered.result;
 
       // Emit intervention to room
       io.to(roomId).emit('ai_intervention_result', {

@@ -136,6 +136,10 @@ Unlike social media flame wars, The Socratic Arena rewards *thinking* — not sh
 
 Full product and API guide: [`docs/ARENA_OS.md`](docs/ARENA_OS.md).
 
+### 💳 Isolated commercial platform
+
+The Plus, Premium, and Business/Education implementation lives behind disabled-by-default commercial flags. It includes regional Paddle/Razorpay checkout, signed webhook reconciliation, server-side entitlements, atomic usage accounting, Pro Studio, persistent evidence collections, and organization controls without changing the free competitive core. Architecture and activation runbook: [`docs/COMMERCIAL_PLATFORM.md`](docs/COMMERCIAL_PLATFORM.md).
+
 ### 📚 Evidence-Grounded AI
 - **PDF ingestion and LangChain chunking** feed Gemini embeddings without retaining the uploaded raw PDF.
 - **Document-scoped semantic retrieval** uses Supabase PostgreSQL + pgvector when configured, with a safe in-memory fallback.

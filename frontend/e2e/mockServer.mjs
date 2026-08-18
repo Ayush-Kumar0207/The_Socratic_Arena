@@ -35,6 +35,8 @@ let studentJoined = false;
 let vote = null;
 let appeal = null;
 let proWaitlistJoined = false;
+let commercialVaults = [];
+let commercialProgress = [{ id: 'progress-1', overall: 72, percentile: 75, confidence: 70, metrics: {}, captured_at: '2026-08-01T00:00:00.000Z' }];
 
 const userId = (req) =>
   String(req.get("authorization") || "").replace(/^Bearer e2e:/, "") ||
@@ -116,6 +118,20 @@ const baseArena = (id) => ({
 });
 
 app.get("/health", (_req, res) => res.json({ success: true }));
+const commercialEntitlements = { human_debates: true, ai_sparring: true, advanced_analytics: true, deep_review: true, replay_lab: true, evidence_vault: true, career_simulator: true, mentor_twin: false, voice_pro: false, organization_admin: false };
+const commercialLimits = { ai_practice_turn: 600, ai_practice_score: 80, evidence_session: 30, ai_summary: 100, ai_objection: 100, tts_character: 150000, deep_review: 8, replay_branch: 20 };
+const commercialPlans = currency => [
+  { code: 'starter', name: 'Starter', tagline: 'The complete human debate network, free.', prices: { monthly: 0, annual: 0 }, currency, provider: null, features: ['Unlimited human debates and public Arenas', 'Core reasoning profile and match history'], entitlements: { human_debates: true } },
+  { code: 'plus', name: 'Plus', tagline: 'Build a measurable reasoning practice.', prices: currency === 'INR' ? { monthly: 29900, annual: 287000 } : { monthly: 599, annual: 5750 }, currency, provider: currency === 'INR' ? 'razorpay' : 'paddle', features: ['10× larger AI coaching allowance', 'Reasoning progression and advanced analytics'], entitlements: commercialEntitlements },
+  { code: 'premium', name: 'Premium', tagline: 'A private Socratic mentor built from your history.', prices: currency === 'INR' ? { monthly: 79900, annual: 767000 } : { monthly: 1499, annual: 14390 }, currency, provider: currency === 'INR' ? 'razorpay' : 'paddle', features: ['Socratic Mentor and reasoning twin', 'Persistent Evidence Vault and Deep Review'], entitlements: { ...commercialEntitlements, mentor_twin: true, voice_pro: true } },
+  { code: 'business', name: 'Business & Education', tagline: 'Private reasoning infrastructure for teams and cohorts.', prices: { monthly: null, annual: null }, currency, provider: null, features: ['Organization workspace, roles, cohorts, and pooled usage', 'Custom rubrics, scenarios, evidence vaults, and tournaments'], entitlements: { ...commercialEntitlements, organization_admin: true } },
+];
+app.get('/api/commercial/catalog', (req, res) => { const currency = req.query.country === 'IN' ? 'INR' : 'USD'; res.json({ success: true, commercialEnabled: true, region: { provider: currency === 'INR' ? 'razorpay' : 'paddle', currency }, annualSavingsPercent: 20, plans: commercialPlans(currency) }); });
+app.get('/api/commercial/me', (req, res) => { const currency = req.query.country === 'IN' ? 'INR' : 'USD'; res.json({ success: true, data: { enabled: true, planCode: 'plus', plan: { name: 'Plus', tagline: 'Build a measurable reasoning practice.' }, subscription: { provider: currency === 'INR' ? 'razorpay' : 'paddle', status: 'active', billing_interval: 'annual', current_period_end: '2027-08-18T00:00:00.000Z', cancel_at_period_end: false }, entitlements: commercialEntitlements, limits: { monthly: commercialLimits, daily: {} }, usage: [{ feature_key: 'ai_practice_turn', consumed_units: 42, reserved_units: 1 }] } }); });
+app.get('/api/commercial/studio', (_req, res) => res.json({ success: true, data: { planCode: 'plus', entitlements: commercialEntitlements, progress: commercialProgress, memories: [], replays: [], reviews: [], voice: [], vaults: commercialVaults, memberships: [] } }));
+app.post('/api/commercial/progress/capture', (_req, res) => { const snapshot = { id: crypto.randomUUID(), overall: 74, percentile: 77, confidence: 72, metrics: {}, captured_at: new Date().toISOString() }; commercialProgress.push(snapshot); res.status(201).json({ success: true, snapshot }); });
+app.post('/api/commercial/vaults', (req, res) => { const vault = { id: crypto.randomUUID(), name: req.body.name, description: req.body.description, retention_days: req.body.retentionDays || 365, created_at: new Date().toISOString() }; commercialVaults.push(vault); res.status(201).json({ success: true, vault }); });
+app.post('/api/commercial/sales-leads', (_req, res) => res.status(201).json({ success: true, message: 'Thanks — your organization request is recorded.' }));
 app.get("/api/product/bootstrap", (req, res) =>
   res.json({ success: true, data: baseArena(userId(req)) }),
 );

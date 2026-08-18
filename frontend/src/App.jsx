@@ -31,6 +31,10 @@ const EvidenceArena = lazy(() => import("./components/EvidenceArena"));
 const TournamentBracket = lazy(() => import("./components/TournamentBracket"));
 const TeamArena = lazy(() => import("./components/TeamArena"));
 const CredentialVerify = lazy(() => import("./components/CredentialVerify"));
+const Pricing = lazy(() => import("./components/Pricing"));
+const Billing = lazy(() => import("./components/Billing"));
+const ProStudio = lazy(() => import("./components/ProStudio"));
+const LegalPage = lazy(() => import("./components/LegalPage"));
 
 const E2E_TEST_AUTH = import.meta.env.VITE_E2E_TEST_AUTH === "true";
 const e2eSession = () => {
@@ -301,6 +305,8 @@ const App = () => {
             }
           />
           <Route path="/verify/:code" element={<CredentialVerify />} />
+          <Route path="/pricing" element={<Pricing user={session?.user} />} />
+          <Route path="/legal/:type" element={<LegalPage />} />
 
           {/* Authenticated Routes — Wrapped in ErrorBoundaries for Chunk Load Failure recovery */}
           <Route
@@ -444,6 +450,14 @@ const App = () => {
                 <Navigate to="/" replace />
               )
             }
+          />
+          <Route
+            path="/billing"
+            element={session ? <ErrorBoundary><Billing user={session.user} /></ErrorBoundary> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/pro-studio"
+            element={session ? <ErrorBoundary><ProStudio user={session.user} /></ErrorBoundary> : <Navigate to="/" replace />}
           />
 
           {/* Fallback routing */}
