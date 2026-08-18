@@ -65,6 +65,12 @@ const aiRequestDurationSeconds = new client.Histogram({
   buckets: [0.25, 0.5, 1, 2, 5, 10, 20, 40, 80],
 });
 
+const aiAllowanceEventsTotal = new client.Counter({
+  name: `${METRIC_PREFIX}ai_allowance_events_total`,
+  help: 'Launch allowance decisions for variable-cost AI features.',
+  labelNames: ['feature', 'outcome', 'scope', 'mode'],
+});
+
 const alertsReceivedTotal = new client.Counter({
   name: `${METRIC_PREFIX}alerts_received_total`,
   help: 'Alertmanager webhook alerts received by the backend.',
@@ -93,6 +99,7 @@ register.registerMetric(waitingQueuePlayers);
 register.registerMetric(matchEventsTotal);
 register.registerMetric(aiRequestsTotal);
 register.registerMetric(aiRequestDurationSeconds);
+register.registerMetric(aiAllowanceEventsTotal);
 register.registerMetric(alertsReceivedTotal);
 register.registerMetric(cognitiveInsightsTotal);
 register.registerMetric(cognitiveRiskScore);
@@ -177,6 +184,15 @@ export const recordAiRequest = ({ status, mode, durationSeconds }) => {
   };
   aiRequestsTotal.inc(labels);
   aiRequestDurationSeconds.observe(labels, Math.max(0, durationSeconds || 0));
+};
+
+export const recordAiAllowance = ({ feature, outcome, scope, mode }) => {
+  aiAllowanceEventsTotal.inc({
+    feature: sanitizeLabel(feature),
+    outcome: sanitizeLabel(outcome),
+    scope: sanitizeLabel(scope),
+    mode: sanitizeLabel(mode),
+  });
 };
 
 export const recordAlertReceived = (status = 'firing') => {

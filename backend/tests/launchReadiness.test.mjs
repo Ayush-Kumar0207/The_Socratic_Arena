@@ -12,7 +12,12 @@ import {
   signCredential,
 } from '../lib/platformWorkflows.js';
 import { assertPublicSourceUrl, extractEvidenceClaims, extractEvidenceUrls, verifyEvidence } from '../lib/evidenceVerifier.js';
-import { clearRateLimitsForTest, createRateLimit } from '../lib/rateLimit.js';
+import {
+  clearRateLimitsForTest,
+  consumeDailyAllowance,
+  createDailyAllowance,
+  createRateLimit,
+} from '../lib/rateLimit.js';
 import { JUDGE_PANEL, runBlindJudgePanel } from '../lib/judgePanel.js';
 import { buildVerifiedTournamentResult } from '../lib/tournamentIntegrity.js';
 
@@ -96,6 +101,56 @@ test('rate limiter accepts a distributed atomic consumer', async () => {
   assert.equal(blocked.statusCode, 429);
   assert.equal(blocked.headers['X-RateLimit-Mode'], 'redis-distributed');
   assert.equal(calls[0].bucketKey, 'global:203.0.113.1');
+});
+
+test('daily AI allowance returns a friendly UTC-reset response', async () => {
+  const decisions = [];
+  const consume = async ({ max }) => ({
+    allowed: decisions.length === 0,
+    count: Math.min(max, decisions.length + 1),
+    retryAfterMs: 3_600_000,
+    resetAt: Date.parse('2026-08-19T00:00:00.000Z'),
+    mode: 'redis-distributed',
+  });
+  const middleware = createDailyAllowance({
+    name: 'practice-score-user',
+    max: 1,
+    message: 'AI practice resets tomorrow.',
+    consume,
+    onDecision: decision => decisions.push(decision),
+  });
+  const makeResponse = () => ({ statusCode: 200, headers: {}, body: null, set(name, value) { this.headers[name] = value; }, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } });
+  let nextCount = 0;
+  await middleware({ user: { id: 'launch-user' } }, makeResponse(), () => { nextCount += 1; });
+  const blocked = makeResponse();
+  await middleware({ user: { id: 'launch-user' } }, blocked, () => { nextCount += 1; });
+  assert.equal(nextCount, 1);
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.body.code, 'DAILY_ALLOWANCE_REACHED');
+  assert.equal(blocked.body.message, 'AI practice resets tomorrow.');
+  assert.equal(blocked.headers['X-Daily-Allowance-Reset'], '2026-08-19T00:00:00.000Z');
+  assert.equal(blocked.headers['X-Daily-Allowance-Mode'], 'redis-distributed');
+  assert.equal(decisions[1].outcome, 'blocked');
+});
+
+test('process-local daily allowance separates UTC days and users', async () => {
+  const previousRedisUrl = process.env.REDIS_URL;
+  delete process.env.REDIS_URL;
+  clearRateLimitsForTest();
+  try {
+    const first = await consumeDailyAllowance({ bucketKey: 'practice:user-a', max: 1, now: Date.parse('2026-08-18T23:59:00.000Z') });
+    const blocked = await consumeDailyAllowance({ bucketKey: 'practice:user-a', max: 1, now: Date.parse('2026-08-18T23:59:30.000Z') });
+    const otherUser = await consumeDailyAllowance({ bucketKey: 'practice:user-b', max: 1, now: Date.parse('2026-08-18T23:59:30.000Z') });
+    const nextDay = await consumeDailyAllowance({ bucketKey: 'practice:user-a', max: 1, now: Date.parse('2026-08-19T00:00:00.000Z') });
+    assert.equal(first.allowed, true);
+    assert.equal(blocked.allowed, false);
+    assert.equal(otherUser.allowed, true);
+    assert.equal(nextDay.allowed, true);
+  } finally {
+    if (previousRedisUrl === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = previousRedisUrl;
+    clearRateLimitsForTest();
+  }
 });
 
 test('tournament advancement is derived only from a canonical completed match', () => {

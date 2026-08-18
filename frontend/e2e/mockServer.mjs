@@ -34,6 +34,7 @@ let submission = null;
 let studentJoined = false;
 let vote = null;
 let appeal = null;
+let proWaitlistJoined = false;
 
 const userId = (req) =>
   String(req.get("authorization") || "").replace(/^Bearer e2e:/, "") ||
@@ -91,6 +92,7 @@ const baseArena = (id) => ({
   credentials: [],
   appeals: [],
   practice: [],
+  proWaitlist: proWaitlistJoined,
   submissions: [],
   moderation: { actions: [], appeals: [] },
   admin: { is_admin: false, moderation_queue: null },
@@ -117,6 +119,51 @@ app.get("/health", (_req, res) => res.json({ success: true }));
 app.get("/api/product/bootstrap", (req, res) =>
   res.json({ success: true, data: baseArena(userId(req)) }),
 );
+app.post("/api/product/pro-waitlist", (_req, res) => {
+  proWaitlistJoined = true;
+  return res.status(201).json({ success: true, joined: true });
+});
+app.post("/api/product/practice/respond", (req, res) =>
+  res.json({
+    success: true,
+    response: `A rigorous counterargument to round ${Number(req.body.round) || 1}, followed by one probing question.`,
+    coachCue: "Answer the strongest objection directly, then add one calibrated proof point.",
+    round: Number(req.body.round) || 1,
+  }),
+);
+app.post("/api/product/practice/complete", (_req, res) => {
+  setTimeout(
+    () =>
+      res.status(201).json({
+        success: true,
+        persisted: true,
+        result: {
+          overall: 78,
+          feedback: "A direct, well-calibrated practice session with clear rebuttals.",
+          metrics: {
+            logic: 80,
+            evidence: 76,
+            rebuttal: 82,
+            clarity: 81,
+            conciseness: 75,
+            persuasion: 79,
+            listening: 78,
+            calibration: 77,
+            humility: 76,
+            sourceReliability: 74,
+            emotionalControl: 80,
+          },
+          strengths: ["rebuttal", "clarity"],
+          improvements: ["sourceReliability", "conciseness"],
+          recommended_drill: {
+            title: "Evidence calibration sprint",
+            description: "Tie each factual claim to a source and state confidence explicitly.",
+          },
+        },
+      }),
+    750,
+  );
+});
 app.post("/api/product/classrooms/join", (req, res) => {
   if (req.body.join_code !== classroom.join_code)
     return res.status(404).json({ message: "Code not found" });

@@ -126,10 +126,18 @@ import { computeReasoningProfile } from './lib/reasoningProfile.js';
 import { buildDebateHighlights, computeCohortPercentile } from './lib/platformWorkflows.js';
 import { JUDGE_PANEL, runBlindJudgePanel } from './lib/judgePanel.js';
 import { createRealtimeCoordinator } from './lib/realtimeState.js';
-import { createRateLimit, ensureRateLimitReady, rateLimitHealth } from './lib/rateLimit.js';
+import {
+  consumeDailyAllowance,
+  createDailyAllowance,
+  createRateLimit,
+  ensureRateLimitReady,
+  rateLimitHealth,
+} from './lib/rateLimit.js';
+import { launchAiLimits, launchAllowanceMessages, launchLimitSummary } from './lib/launchLimits.js';
 import {
   metricsHandler,
   observeHttpRequests,
+  recordAiAllowance,
   recordAiRequest,
   recordAlertReceived,
   recordCognitiveInsight,
@@ -520,6 +528,11 @@ setInterval(async () => {
  */
 const app = express();
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const trustProxyHops = Math.max(
+  0,
+  Number(process.env.TRUST_PROXY_HOPS) || (process.env.NODE_ENV === 'production' ? 1 : 0),
+);
+if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
 
 /**
  * Basic Middleware Configuration
@@ -634,6 +647,12 @@ app.post('/api/alerts/prometheus', async (req, res) => {
 
 // Mount all API routes under a versionable base path.
 // Example: POST /api/debate
+app.use('/api', createRateLimit({
+  name: 'api-ip',
+  max: Math.max(60, Number(process.env.API_REQUESTS_PER_IP_PER_MINUTE) || 300),
+  windowMs: 60_000,
+  key: req => req.ip,
+}));
 app.use('/api', createApiRoutes({ supabase }));
 app.use('/api/product', createProductRoutes({ supabase, generateWithRetry, advancedAi: ENABLE_ADVANCED_AI }));
 const authenticateHttp = async (req, res, next) => {
@@ -645,7 +664,29 @@ const authenticateHttp = async (req, res, next) => {
   return next();
 };
 // Endpoint to dynamically generate and save a 1-liner crux summary for a match
-app.post('/api/matches/:id/summary', authenticateHttp, createRateLimit({ name: 'match-summary', max: 10, windowMs: 10 * 60_000 }), async (req, res) => {
+app.post(
+  '/api/matches/:id/summary',
+  authenticateHttp,
+  createRateLimit({ name: 'match-summary', max: 10, windowMs: 10 * 60_000 }),
+  createDailyAllowance({
+    name: 'match-summary-user-daily',
+    max: launchAiLimits.summariesPerUser,
+    message: launchAllowanceMessages.summary,
+    code: 'DAILY_AI_ALLOWANCE_REACHED',
+    skip: () => !ENABLE_ADVANCED_AI || !process.env.GEMINI_API_KEY,
+    onDecision: recordAiAllowance,
+  }),
+  createDailyAllowance({
+    name: 'match-summary-global-daily',
+    max: launchAiLimits.summariesGlobal,
+    message: launchAllowanceMessages.globalSummary,
+    code: 'AI_CAPACITY_REACHED',
+    scope: 'global',
+    key: () => 'all-users',
+    skip: () => !ENABLE_ADVANCED_AI || !process.env.GEMINI_API_KEY,
+    onDecision: recordAiAllowance,
+  }),
+  async (req, res) => {
   const { id } = req.params;
   try {
     const { data: match, error } = await supabase.from('matches').select('transcript, ai_scores').eq('id', id).single();
@@ -785,6 +826,7 @@ app.get('/health', (req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     realtime: realtimeCoordinator?.health?.() || { mode: 'initializing', connected: false },
     rateLimit: rateLimitHealth(),
+    aiAllowances: launchLimitSummary(),
   });
 });
 
@@ -1361,6 +1403,17 @@ const checkRateLimit = (userId, endpoint, maxRequests, windowMs) => {
   return true;
 };
 
+const consumeSocketAiAllowance = async ({ userId, userFeature, userMax, userMessage, globalFeature, globalMax, globalMessage }) => {
+  const userResult = await consumeDailyAllowance({ bucketKey: `${userFeature}:${userId}`, max: userMax, now: Date.now() });
+  recordAiAllowance({ feature: userFeature, outcome: userResult.allowed ? 'allowed' : 'blocked', scope: 'user', mode: userResult.mode });
+  if (!userResult.allowed) return { allowed: false, code: 'DAILY_AI_ALLOWANCE_REACHED', message: userMessage };
+
+  const globalResult = await consumeDailyAllowance({ bucketKey: `${globalFeature}:all-users`, max: globalMax, now: Date.now() });
+  recordAiAllowance({ feature: globalFeature, outcome: globalResult.allowed ? 'allowed' : 'blocked', scope: 'global', mode: globalResult.mode });
+  if (!globalResult.allowed) return { allowed: false, code: 'AI_CAPACITY_REACHED', message: globalMessage };
+  return { allowed: true };
+};
+
 /**
  * Challenge System State
  * ---------------------------------------------------------------------------
@@ -1882,6 +1935,27 @@ io.on('connection', (socket) => {
     if (targetMsg.speaker === playerRole) {
       socket.emit('error', { message: 'You cannot object to your own message.' });
       return;
+    }
+
+    if (process.env.GEMINI_API_KEY) {
+      const allowance = await consumeSocketAiAllowance({
+        userId: callerId,
+        userFeature: 'ai-objection-user-daily',
+        userMax: launchAiLimits.objectionsPerUser,
+        userMessage: launchAllowanceMessages.objection,
+        globalFeature: 'ai-objection-global-daily',
+        globalMax: launchAiLimits.objectionsGlobal,
+        globalMessage: launchAllowanceMessages.globalObjection,
+      });
+      if (!allowance.allowed) {
+        socket.emit('ai_intervention_result', {
+          targetMessageId,
+          flagged: false,
+          code: allowance.code,
+          error: allowance.message,
+        });
+        return;
+      }
     }
 
     // Consume the lifeline

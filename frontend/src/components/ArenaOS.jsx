@@ -73,6 +73,28 @@ const tabs = [
   { id: "trust", label: "Trust", Icon: ShieldCheck },
 ];
 
+const bootstrapCacheKey = (userId) => `arena-os:bootstrap:${userId || "guest"}`;
+
+const readBootstrapCache = (userId) => {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(bootstrapCacheKey(userId)));
+    return cached?.data || null;
+  } catch {
+    return null;
+  }
+};
+
+const writeBootstrapCache = (userId, data) => {
+  try {
+    sessionStorage.setItem(
+      bootstrapCacheKey(userId),
+      JSON.stringify({ data, cachedAt: Date.now() }),
+    );
+  } catch {
+    // Storage can be unavailable in private browsing; live data still works.
+  }
+};
+
 const fallback = (user) => ({
   profile: {
     username:
@@ -133,6 +155,7 @@ const fallback = (user) => ({
   credentials: [],
   appeals: [],
   practice: [],
+  proWaitlist: false,
   moderation: { actions: [], appeals: [] },
   admin: { is_admin: false, moderation_queue: null },
   tournaments: [
@@ -284,27 +307,31 @@ const Field = ({ label, ...props }) => (
 
 const ArenaOS = ({ user }) => {
   const navigate = useNavigate();
+  const userId = user?.id;
   const [activeTab, setActiveTab] = useState("coach");
-  const [data, setData] = useState(() => fallback(user));
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => readBootstrapCache(userId) || fallback(user));
+  const [loading, setLoading] = useState(() => !readBootstrapCache(userId));
+  const [refreshing, setRefreshing] = useState(true);
   const [offline, setOffline] = useState(false);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState(null);
   const [modal, setModal] = useState(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     try {
       const response = await api.get("/product/bootstrap");
       setData(response.data.data);
+      writeBootstrapCache(userId, response.data.data);
       setOffline(false);
     } catch (error) {
       console.warn("[Arena OS] Using preview data:", error.message);
       setOffline(true);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     load();
@@ -376,6 +403,7 @@ const ArenaOS = ({ user }) => {
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <Pill>Arena OS</Pill>
                 <Pill tone="violet">Founders season</Pill>
+                <Pill tone="violet">Pro coming soon</Pill>
                 {offline && <Pill tone="amber">Preview mode</Pill>}
               </div>
               <h1 className="max-w-3xl text-3xl font-black tracking-tight text-white sm:text-5xl">
@@ -400,6 +428,27 @@ const ArenaOS = ({ user }) => {
               >
                 <Swords className="h-4 w-4" /> Find a match
               </button>
+              <button
+                onClick={() =>
+                  act(
+                    "pro-waitlist",
+                    () => api.post("/product/pro-waitlist"),
+                    "You're on the Socratic Arena Pro waitlist.",
+                    (current) => ({ ...current, proWaitlist: true }),
+                  )
+                }
+                disabled={busy === "pro-waitlist" || data.proWaitlist}
+                className="flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-3 text-sm font-bold text-violet-200 hover:bg-violet-500/20 disabled:cursor-default disabled:opacity-70"
+              >
+                {busy === "pro-waitlist" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : data.proWaitlist ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {data.proWaitlist ? "Pro waitlist joined" : "Join Pro waitlist"}
+              </button>
             </div>
           </div>
         </header>
@@ -419,21 +468,29 @@ const ArenaOS = ({ user }) => {
 
         {notice && (
           <div
-            className={`mt-5 flex items-center justify-between rounded-xl border px-4 py-3 text-sm ${notice.type === "success" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-rose-500/30 bg-rose-500/10 text-rose-300"}`}
+            role={notice.type === "error" ? "alert" : "status"}
+            aria-live={notice.type === "error" ? "assertive" : "polite"}
+            className={`fixed left-4 right-4 top-20 z-50 flex items-start justify-between gap-4 rounded-2xl border px-4 py-3 text-sm shadow-2xl backdrop-blur-xl sm:left-auto sm:right-6 sm:max-w-md ${notice.type === "success" ? "border-emerald-500/40 bg-emerald-950/95 text-emerald-200 shadow-emerald-950/40" : "border-rose-500/40 bg-rose-950/95 text-rose-200 shadow-rose-950/40"}`}
           >
-            <span>{notice.text}</span>
-            <button onClick={() => setNotice(null)}>
+            <span className="font-semibold leading-6">{notice.text}</span>
+            <button aria-label="Dismiss notification" onClick={() => setNotice(null)} className="mt-0.5 shrink-0 rounded-lg p-1 hover:bg-white/10">
               <X className="h-4 w-4" />
             </button>
           </div>
         )}
 
         {loading ? (
-          <div className="flex min-h-[420px] items-center justify-center">
-            <Loader2 className="h-9 w-9 animate-spin text-cyan-400" />
+          <div className="flex min-h-[420px] items-center justify-center" role="status" aria-live="polite">
+            <div className="flex max-w-sm flex-col items-center text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
+                <Loader2 className="h-7 w-7 animate-spin text-cyan-400" />
+              </div>
+              <p className="mt-4 font-black text-white">Loading your Arena OS</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Syncing coaching progress, matches, classrooms, and trust data.</p>
+            </div>
           </div>
         ) : (
-          <div className="mt-5">
+          <div className={`mt-5 transition-opacity ${refreshing ? "opacity-80" : "opacity-100"}`} aria-busy={refreshing}>
             {activeTab === "coach" && (
               <CoachTab
                 data={data}

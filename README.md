@@ -431,6 +431,8 @@ cd frontend && npm install && npm run dev
 
 The backend exposes Prometheus metrics at `GET /metrics`, a liveness probe at `GET /health`, and a dependency-readiness probe at `GET /ready`. Readiness verifies Supabase plus both Redis-backed realtime coordination and global rate limiting when Redis is configured. A scheduled GitHub Actions smoke test calls the deployed Vercel frontend and Render readiness endpoint daily without spending Gemini quota.
 
+For the free public beta, variable-cost features also have Redis-backed daily allowances that reset at 00:00 UTC. Defaults allow five scored AI-practice sessions per user, three Evidence Arena sessions per user, capped voice/deep-analysis usage, and separate platform-wide ceilings for launch spikes. Human debates, rankings, profiles, clubs, and tournaments are not charged against these AI allowances. Override the `AI_*_DAILY`, `EVIDENCE_ARENA_*_DAILY`, and `TTS_*_DAILY` environment variables only after checking observed cost and capacity. Production should keep `REDIS_URL` configured so allowances remain shared across every backend instance.
+
 ```bash
 # Terminal 1: backend metrics source
 cd backend

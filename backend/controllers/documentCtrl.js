@@ -144,7 +144,7 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
             success: false,
             sessionId,
             message: isRateLimited
-              ? 'Google API quota was reached. Wait about 60 seconds and try again.'
+              ? 'AI is temporarily at capacity. Your document was not retained. Please try Evidence Arena again later.'
               : 'Evidence Arena could not complete this document. Please try again.',
           });
         }

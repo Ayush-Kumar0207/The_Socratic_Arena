@@ -18,7 +18,9 @@ import {
   signCredential,
 } from '../lib/platformWorkflows.js';
 import { verifyEvidence } from '../lib/evidenceVerifier.js';
-import { createRateLimit } from '../lib/rateLimit.js';
+import { createDailyAllowance, createRateLimit } from '../lib/rateLimit.js';
+import { launchAiLimits, launchAllowanceMessages } from '../lib/launchLimits.js';
+import { recordAiAllowance } from '../lib/observability.js';
 import { JUDGE_PANEL, runBlindJudgePanel } from '../lib/judgePanel.js';
 import { buildVerifiedTournamentResult } from '../lib/tournamentIntegrity.js';
 
@@ -68,6 +70,26 @@ const csvCell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
 export default function createProductRoutes({ supabase, generateWithRetry, advancedAi = true }) {
   const router = express.Router();
+  const aiConfigured = advancedAi && Boolean(process.env.GEMINI_API_KEY);
+  const skipAiAllowance = () => !aiConfigured;
+  const userAllowance = ({ name, max, message }) => createDailyAllowance({
+    name,
+    max,
+    message,
+    code: 'DAILY_AI_ALLOWANCE_REACHED',
+    skip: skipAiAllowance,
+    onDecision: recordAiAllowance,
+  });
+  const globalAllowance = ({ name, max, message }) => createDailyAllowance({
+    name,
+    max,
+    message,
+    code: 'AI_CAPACITY_REACHED',
+    scope: 'global',
+    key: () => 'all-users',
+    skip: skipAiAllowance,
+    onDecision: recordAiAllowance,
+  });
 
   const authenticate = async (req, res, next) => {
     const token = req.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
@@ -321,6 +343,7 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
         credentials,
         appeals,
         practice,
+        proWaitlist: Boolean(req.user.user_metadata?.pro_waitlist_joined_at),
         moderation: { actions: moderationActions, appeals: moderationAppeals, active_action: req.moderationAction },
         admin: { is_admin: admin, moderation_queue: moderationQueue },
         trust: {
@@ -341,6 +364,23 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
       console.error('[Arena OS] Bootstrap failed:', error);
       return res.status(500).json({ success: false, message: 'Unable to load Arena OS' });
     }
+  });
+
+  router.post('/pro-waitlist', createRateLimit({ name: 'pro-waitlist', max: 3, windowMs: 24 * 60 * 60_000 }), async (req, res) => {
+    const existingJoinedAt = req.user.user_metadata?.pro_waitlist_joined_at;
+    const joinedAt = existingJoinedAt || new Date().toISOString();
+    const { error } = await supabase.auth.admin.updateUserById(req.user.id, {
+      user_metadata: {
+        ...(req.user.user_metadata || {}),
+        pro_waitlist_joined_at: joinedAt,
+        pro_waitlist_source: 'product-hunt-public-beta',
+      },
+    });
+    if (error) {
+      console.error('[Pro waitlist] Unable to update user metadata:', error.message);
+      return res.status(503).json({ success: false, message: 'The Pro waitlist is temporarily unavailable. Please try again shortly.' });
+    }
+    return res.status(existingJoinedAt ? 200 : 201).json({ success: true, joined: true, joined_at: joinedAt });
   });
 
   router.post('/drills/:drillId/complete', async (req, res) => {
@@ -524,30 +564,67 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     return res.json({ success: true, classroom, assignments, rows, summary: { students: members.length, assignments: assignments.length, submissions: submissions.length, completion_rate: assignments.length && members.length ? Math.round((submissions.length / (assignments.length * members.length)) * 100) : 0, average_grade: graded.length ? Math.round(graded.reduce((sum, row) => sum + Number(row.grade), 0) / graded.length) : null } });
   });
 
-  router.post('/practice/respond', async (req, res) => {
+  router.post(
+    '/practice/respond',
+    userAllowance({
+      name: 'practice-turn-user',
+      max: launchAiLimits.practiceTurnsPerUser,
+      message: launchAllowanceMessages.practice,
+    }),
+    globalAllowance({
+      name: 'practice-turn-global',
+      max: launchAiLimits.practiceTurnsGlobal,
+      message: launchAllowanceMessages.globalPractice,
+    }),
+    async (req, res) => {
     const { topic, stance = 'for', message, history = [], scenario_key, round = 1 } = req.body;
     if (!cleanText(message)) return res.status(400).json({ success: false, message: 'Your argument cannot be empty' });
     let response = '';
+    let aiMode = 'local';
     if (advancedAi && process.env.GEMINI_API_KEY) {
       try {
         const prompt = `You are a rigorous but constructive sparring partner. The learner argues ${stance} "${topic}"${scenario_key ? ` in ${scenario_key}` : ''}. Give a direct 70-120 word counterargument, identify one unsupported assumption, and end with one probing question. No markdown.\n${history.slice(-6).map(turn => `${turn.role}: ${turn.text}`).join('\n')}\nLearner: ${message}`;
         response = cleanText(await generateWithRetry(prompt, 2, false), 1200);
+        aiMode = 'gemini';
       } catch (error) { console.warn('[Practice] AI fallback:', error.message); }
     }
     if (!response) response = buildLocalOpponent({ topic, stance, message, round });
     const wordCount = cleanText(message, 10000).split(/\s+/).length;
     const coachCue = wordCount < 35 ? 'Add the warrant: explain why your premise makes the conclusion more likely.' : wordCount > 180 ? 'Compress this to one claim, one proof point, and one direct rebuttal.' : 'Good working length. Quote the opponent’s strongest claim before answering it.';
-    return res.json({ success: true, response, coachCue, round: Number(round) });
+    return res.json({
+      success: true,
+      response,
+      coachCue,
+      round: Number(round),
+      ai_mode: aiMode,
+      notice: aiMode === 'local' && aiConfigured
+        ? 'AI is temporarily at capacity. This round used the local sparring fallback, so your practice can continue.'
+        : null,
+    });
   });
 
-  router.post('/practice/complete', async (req, res) => {
+  router.post(
+    '/practice/complete',
+    userAllowance({
+      name: 'practice-score-user',
+      max: launchAiLimits.practiceScoresPerUser,
+      message: launchAllowanceMessages.practice,
+    }),
+    globalAllowance({
+      name: 'practice-score-global',
+      max: launchAiLimits.practiceScoresGlobal,
+      message: launchAllowanceMessages.globalPractice,
+    }),
+    async (req, res) => {
     const { topic, transcript = [], scenario_key = null, duration_seconds = 0 } = req.body;
     if (!Array.isArray(transcript) || !transcript.length) return res.status(400).json({ success: false, message: 'A transcript is required' });
     let result = null;
+    let aiMode = 'local';
     if (advancedAi && process.env.GEMINI_API_KEY) {
       try {
         const prompt = `Score this practice 0-100. Return only JSON with metrics containing exactly ${REASONING_METRICS.join(', ')}, overall, feedback, strengths (2), improvements (2). Reward direct response, truthful calibration, reliable evidence, and emotional control.\nTopic: ${topic}\n${transcript.slice(-12).map(turn => `${turn.role}: ${turn.text}`).join('\n')}`;
         result = await generateWithRetry(prompt, 2, true);
+        aiMode = 'gemini';
       } catch (error) { console.warn('[Practice] Scoring fallback:', error.message); }
     }
     if (!result?.metrics) result = deterministicPracticeScore(transcript);
@@ -555,7 +632,7 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     result.overall = Math.round(Number(result.overall) || Object.values(result.metrics).reduce((sum, value) => sum + value, 0) / REASONING_METRICS.length);
     result.recommended_drill = pickDrill(result.metrics);
     const rows = await safeRows(supabase.from('practice_sessions').insert({ user_id: req.user.id, session_type: scenario_key ? 'simulation' : 'ai_sparring', scenario_key, topic: cleanText(topic, 500), transcript: transcript.slice(-30), scores: result, duration_seconds: Number(duration_seconds) || 0 }).select(), []);
-    return res.status(201).json({ success: true, result, session: rows[0] || null, persisted: Boolean(rows[0]) });
+    return res.status(201).json({ success: true, result, session: rows[0] || null, persisted: Boolean(rows[0]), ai_mode: aiMode });
   });
 
   router.post('/moderation/reports', async (req, res) => {
