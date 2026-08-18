@@ -1,7 +1,9 @@
 import express from 'express';
 import multer from 'multer';
 import { createHandleDebateUpload } from '../controllers/documentCtrl.js';
-import { createRateLimit } from '../lib/rateLimit.js';
+import { createDailyAllowance, createRateLimit } from '../lib/rateLimit.js';
+import { launchAiLimits, launchAllowanceMessages } from '../lib/launchLimits.js';
+import { recordAiAllowance } from '../lib/observability.js';
 import { freeSttConfig, getFreeSttStatus, transcribeAudioBuffer } from '../services/freeSttClient.js';
 import { assertEvidenceDocumentOwnership } from '../services/ai/supabaseVectorStore.js';
 import { createPollyService, validateTtsText } from '../services/tts/pollyService.js';
@@ -45,6 +47,24 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
   const router = express.Router();
   const authenticate = createAuthenticateMiddleware(supabase);
   const handleDebateUpload = createHandleDebateUpload({ supabase });
+  const userAllowance = ({ name, max, message, skip }) => createDailyAllowance({
+    name,
+    max,
+    message,
+    code: 'DAILY_AI_ALLOWANCE_REACHED',
+    skip,
+    onDecision: recordAiAllowance,
+  });
+  const globalAllowance = ({ name, max, message, skip }) => createDailyAllowance({
+    name,
+    max,
+    message,
+    code: 'AI_CAPACITY_REACHED',
+    scope: 'global',
+    key: () => 'all-users',
+    skip,
+    onDecision: recordAiAllowance,
+  });
 
   router.get('/stt/status', authenticate, createRateLimit({ name: 'stt-status', max: 30 }), async (_req, res) => {
     const status = await getFreeSttStatus();
@@ -57,6 +77,18 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
     createRateLimit({ name: 'pdf-debate-user', max: 3, windowMs: 10 * 60_000 }),
     createRateLimit({ name: 'pdf-debate-ip', max: 8, windowMs: 10 * 60_000, key: req => req.ip }),
     upload.single('document'),
+    userAllowance({
+      name: 'evidence-arena-user',
+      max: launchAiLimits.evidencePerUser,
+      message: launchAllowanceMessages.evidence,
+      skip: () => !process.env.GOOGLE_API_KEY,
+    }),
+    globalAllowance({
+      name: 'evidence-arena-global',
+      max: launchAiLimits.evidenceGlobal,
+      message: launchAllowanceMessages.globalEvidence,
+      skip: () => !process.env.GOOGLE_API_KEY,
+    }),
     handleDebateUpload,
   );
 
@@ -114,6 +146,18 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
     authenticate,
     createRateLimit({ name: 'tts-user', max: 20, windowMs: 10 * 60_000 }),
     createRateLimit({ name: 'tts-ip', max: 50, windowMs: 10 * 60_000, key: req => req.ip }),
+    userAllowance({
+      name: 'tts-user-daily',
+      max: launchAiLimits.ttsPerUser,
+      message: launchAllowanceMessages.tts,
+      skip: () => !ttsService.capabilities.enabled,
+    }),
+    globalAllowance({
+      name: 'tts-global-daily',
+      max: launchAiLimits.ttsGlobal,
+      message: launchAllowanceMessages.globalTts,
+      skip: () => !ttsService.capabilities.enabled,
+    }),
     async (req, res) => {
       try {
         const text = validateTtsText(req.body?.text);

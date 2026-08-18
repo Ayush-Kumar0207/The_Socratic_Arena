@@ -26,10 +26,11 @@ const PracticeArena = () => {
   const [transcript, setTranscript] = useState([{ role: 'opponent', text: opening, round: 0 }]);
   const [message, setMessage] = useState('');
   const [round, setRound] = useState(1);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState('');
   const [coachCue, setCoachCue] = useState('Directly answer the prompt before introducing your own frame.');
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [capacityNotice, setCapacityNotice] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const startedAt = useRef(Date.now());
   const bottomRef = useRef(null);
@@ -41,41 +42,51 @@ const PracticeArena = () => {
     return () => clearInterval(timer);
   }, [result]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [transcript, busy]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [transcript, activity]);
 
   const userTurns = useMemo(() => transcript.filter(turn => turn.role === 'user').length, [transcript]);
-  const canFinish = userTurns >= 3 && !busy;
+  const isBusy = Boolean(activity);
+  const isScoring = activity === 'scoring';
+  const canFinish = userTurns >= 3 && !isBusy;
+  const roomSubtitle = isScoring
+    ? 'Session complete · preparing your results'
+    : activity === 'responding'
+      ? `Round ${round} · opponent is responding`
+      : userTurns >= 3
+        ? `${userTurns} rounds complete · continue or finish`
+        : `Round ${round} · you argue ${stance}`;
 
   const sendTurn = async (event) => {
     event?.preventDefault();
     const text = message.trim();
-    if (!text || busy || result) return;
+    if (!text || isBusy || result) return;
     const nextHistory = [...transcript, { role: 'user', text, round }];
-    setTranscript(nextHistory); setMessage(''); setBusy(true); setError('');
+    setTranscript(nextHistory); setMessage(''); setActivity('responding'); setError('');
     try {
       const response = await api.post('/product/practice/respond', { topic, stance, message: text, history: nextHistory, scenario_key: scenario, round });
       setTranscript(current => [...current, { role: 'opponent', text: response.data.response, round }]);
       setCoachCue(response.data.coachCue);
+      setCapacityNotice(response.data.notice || '');
       setRound(current => current + 1);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'The sparring partner is unavailable. Try again.');
-    } finally { setBusy(false); }
+    } finally { setActivity(''); }
   };
 
   const complete = async () => {
     if (!canFinish) return;
-    setBusy(true); setError('');
+    setActivity('scoring'); setError('');
     try {
       const response = await api.post('/product/practice/complete', { topic, transcript, scenario_key: scenario, duration_seconds: elapsed });
       setResult(response.data.result);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Scoring could not be completed.');
-    } finally { setBusy(false); }
+    } finally { setActivity(''); }
   };
 
   const restart = () => {
     speech.stop();
-    setTranscript([{ role: 'opponent', text: opening, round: 0 }]); setMessage(''); setRound(1); setResult(null); setError(''); setElapsed(0); startedAt.current = Date.now();
+    setTranscript([{ role: 'opponent', text: opening, round: 0 }]); setMessage(''); setRound(1); setResult(null); setError(''); setCapacityNotice(''); setElapsed(0); startedAt.current = Date.now();
   };
 
   const share = async () => {
@@ -109,16 +120,16 @@ const PracticeArena = () => {
 
         <section className="flex min-h-[650px] flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40 lg:min-h-0">
           {!result ? <>
-            <header className="flex items-center justify-between border-b border-slate-800 px-5 py-4"><div><h2 className="font-black text-white">Reasoning room</h2><p className="text-xs text-slate-500">Round {Math.min(round, 4)} · you argue {stance}</p></div><div className="text-right"><div className="flex items-center justify-end gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /><span className="text-xs font-bold text-emerald-400">Coach online</span></div>{speech.capabilities?.enabled && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">Voice output · Amazon Polly</p>}</div></header>
+            <header className="flex items-center justify-between gap-4 border-b border-slate-800 px-5 py-4"><div><h2 className="font-black text-white">Reasoning room</h2><p className={`text-xs ${isScoring ? 'font-semibold text-cyan-300' : 'text-slate-500'}`}>{roomSubtitle}</p></div><div className="text-right"><div className="flex items-center justify-end gap-2"><span className={`h-2 w-2 rounded-full ${isScoring ? 'animate-pulse bg-cyan-400' : 'animate-pulse bg-emerald-400'}`} /><span className={`text-xs font-bold ${isScoring ? 'text-cyan-300' : 'text-emerald-400'}`}>{isScoring ? 'Scoring session' : 'Coach online'}</span></div>{speech.capabilities?.enabled && !isScoring && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-600">Voice output · Amazon Polly</p>}</div></header>
             <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
               {transcript.map((turn, index) => <div key={`${turn.role}-${index}`} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[88%] rounded-2xl border p-4 sm:max-w-[72%] ${turn.role === 'user' ? 'border-cyan-500/30 bg-cyan-500/10' : 'border-slate-700 bg-slate-800/80'}`}><div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500">{turn.role === 'user' ? <BrainCircuit className="h-3 w-3 text-cyan-400" /> : <Bot className="h-3 w-3 text-violet-400" />}{turn.role === 'user' ? 'You' : mode === 'simulation' ? 'Counterpart' : 'Socratic opponent'}{turn.round > 0 && <span>· Round {turn.round}</span>}</div><p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">{turn.text}</p>{turn.role === 'opponent' && <PollyListenButton speech={speech} text={turn.text} speechId={`practice-${index}`} className="mt-3" />}</div></div>)}
-              {busy && <div className="flex justify-start"><div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-800/80 px-4 py-3 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-violet-400" /> Constructing the strongest counterargument…</div></div>}
+              {isBusy && <div className="flex justify-start" role="status" aria-live="polite"><div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm ${isScoring ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200' : 'border-slate-700 bg-slate-800/80 text-slate-400'}`}><Loader2 className={`h-4 w-4 animate-spin ${isScoring ? 'text-cyan-400' : 'text-violet-400'}`} /> {isScoring ? `Analyzing ${userTurns} rounds and preparing your final score…` : 'Constructing the strongest counterargument…'}</div></div>}
               <div ref={bottomRef} />
             </div>
-            {(error || speech.error) && <div className="mx-4 mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error || speech.error}</div>}
+            {capacityNotice && <div role="status" className="mx-4 mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{capacityNotice}</div>}
+            {(error || speech.error) && <div role="alert" className="mx-4 mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error || speech.error}</div>}
             <div className="border-t border-slate-800 p-4">
-              {canFinish && <button onClick={complete} className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-black text-slate-950"><Sparkles className="h-4 w-4" /> Finish and score this session</button>}
-              <form onSubmit={sendTurn} className="flex gap-3"><textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendTurn(); } }} disabled={busy} rows="3" placeholder={userTurns >= 3 ? 'Add another round, or finish for your score…' : 'Answer the exact objection. Use evidence and state your confidence…'} className="min-h-[84px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50" /><button disabled={!message.trim() || busy} className="flex w-14 items-center justify-center rounded-xl bg-cyan-500 text-slate-950 disabled:opacity-40"><Send className="h-5 w-5" /></button></form>
+              {isScoring ? <div className="flex min-h-[84px] items-center gap-4 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 to-violet-500/10 px-5 py-4" role="status" aria-live="assertive"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500/15"><Loader2 className="h-5 w-5 animate-spin text-cyan-300" /></div><div><p className="text-sm font-black text-white">Preparing your final score</p><p className="mt-1 text-xs text-slate-400">Reviewing logic, evidence, rebuttal, clarity, and calibration across the full session.</p></div></div> : <><button type="button" onClick={complete} disabled={!canFinish} className={`mb-3 w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3 text-sm font-black text-slate-950 ${canFinish ? 'flex' : 'hidden'}`}><Sparkles className="h-4 w-4" /> Finish and score this session</button><form onSubmit={sendTurn} className="flex gap-3"><textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendTurn(); } }} disabled={isBusy} rows="3" placeholder={userTurns >= 3 ? 'Add another round, or finish for your score…' : 'Answer the exact objection. Use evidence and state your confidence…'} className="min-h-[84px] flex-1 resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm leading-6 text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50" /><button disabled={!message.trim() || isBusy} className="flex w-14 items-center justify-center rounded-xl bg-cyan-500 text-slate-950 disabled:opacity-40"><Send className="h-5 w-5" /></button></form></>}
             </div>
           </> : <Result result={result} topic={topic} persisted={Boolean(result)} onRestart={restart} onShare={share} onDone={() => navigate('/arena-os')} />}
         </section>

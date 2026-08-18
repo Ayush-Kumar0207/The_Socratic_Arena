@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, BrainCircuit } from 'lucide-react';
+import { Bell, Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, BrainCircuit } from 'lucide-react';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 
@@ -13,38 +13,39 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
 
   return (
     <>
-      <nav className="h-16 w-full bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 flex items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-4 sm:gap-6">
-          <Link to="/" onClick={() => setIsMenuOpen(false)} className="flex items-center gap-2 group">
+      <nav className="sticky top-0 z-40 h-16 w-full border-b border-slate-800 bg-slate-900/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-full w-full max-w-[1720px] items-center justify-between gap-4 px-4 sm:px-6 2xl:px-8">
+        <div className="flex min-w-0 items-center">
+          <Link to="/" onClick={() => setIsMenuOpen(false)} className="group flex shrink-0 items-center gap-2.5">
             <div className="bg-gradient-to-br from-indigo-500 to-cyan-500 p-1.5 rounded-lg group-hover:shadow-[0_0_15px_rgba(99,102,241,0.5)] transition">
               <Shield className="h-5 w-5 text-white" />
             </div>
-            <span className="text-lg sm:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-100 to-slate-400 tracking-tight whitespace-nowrap">Socratic Arena</span>
+            <span className="whitespace-nowrap bg-gradient-to-r from-slate-100 to-slate-400 bg-clip-text text-lg font-bold tracking-tight text-transparent sm:text-xl">Socratic Arena</span>
           </Link>
           
           {user && (
-            <div className="hidden md:flex items-center gap-2 sm:gap-4 ml-4 border-l border-slate-800 pl-6">
+            <div className="ml-5 hidden items-center gap-1 border-l border-slate-800 pl-5 xl:flex 2xl:ml-8 2xl:gap-2 2xl:pl-8">
               <Link 
                 to="/dashboard" 
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/dashboard') || isActive('/') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+                className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${isActive('/dashboard') || isActive('/') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
               >
                 <LayoutDashboard className="h-4 w-4" /> Dashboard
               </Link>
               <Link 
                 to="/explore" 
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/explore') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+                className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${isActive('/explore') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
               >
                 <Compass className="h-4 w-4" /> Explore
               </Link>
               <Link 
                 to="/my-arena" 
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/my-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+                className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${isActive('/my-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
               >
                 <Swords className="h-4 w-4" /> My Arena
               </Link>
               <Link
                 to="/arena-os"
-                className={`flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium ${isActive('/arena-os') || isActive('/practice') || isActive('/evidence-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
+                className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${isActive('/arena-os') || isActive('/practice') || isActive('/evidence-arena') ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'}`}
               >
                 <BrainCircuit className="h-4 w-4" /> Arena OS
               </Link>
@@ -53,20 +54,24 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
         </div>
 
         {user && (
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center gap-2">
             {/* Desktop-only Buttons */}
-            <div className="hidden lg:flex items-center gap-2">
+            <div className="hidden items-center gap-1 xl:flex 2xl:gap-2">
               <button
                 onClick={onCreateArena}
-                className="flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                aria-label="Create Arena"
+                title="Create Arena"
+                className="flex items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800/50 hover:text-slate-200 2xl:px-3"
               >
-                <Plus className="h-4 w-4" /> Create Arena
+                <Plus className="h-4 w-4" /> <span className="hidden 2xl:inline">Create Arena</span>
               </button>
               <button
                 onClick={onJoinArena}
-                className="flex items-center gap-2 px-3 py-2 rounded-md transition text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                aria-label="Join Arena"
+                title="Join Arena"
+                className="flex items-center gap-2 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium text-slate-400 transition hover:bg-slate-800/50 hover:text-slate-200 2xl:px-3"
               >
-                <Link2 className="h-4 w-4" /> Join Arena
+                <Link2 className="h-4 w-4" /> <span className="hidden 2xl:inline">Join Arena</span>
               </button>
             </div>
 
@@ -76,29 +81,32 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
             {/* Desktop Account Button */}
             <button
               onClick={() => setIsProfileOpen(true)}
-              className="hidden sm:flex items-center gap-2.5 bg-slate-800 hover:bg-slate-700/80 transition-all rounded-full pl-3 pr-4 py-1.5 border border-slate-700 shadow-inner group cursor-pointer"
+              aria-label="Open account"
+              className="group hidden items-center rounded-full border border-slate-700 bg-slate-800 p-1.5 shadow-inner transition-all hover:bg-slate-700/80 sm:flex 2xl:gap-2.5 2xl:py-1.5 2xl:pl-2 2xl:pr-4"
             >
               <div className="shrink-0 bg-cyan-600/10 rounded-full p-2 border border-cyan-500/20 group-hover:bg-cyan-600/20">
                 <User className="h-5 w-5 text-cyan-400" />
               </div>
-              <span className="text-slate-300 text-sm font-medium font-bold lg:inline-block">Account</span>
-              <ChevronDown className="h-4 w-4 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+              <span className="hidden text-sm font-bold text-slate-300 2xl:inline-block">Account</span>
+              <ChevronDown className="hidden h-4 w-4 text-slate-500 transition-colors group-hover:text-cyan-400 2xl:block" />
             </button>
 
             {/* Mobile Menu Toggle */}
             <button 
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="flex md:hidden p-2 text-slate-400 hover:text-slate-100 transition-colors bg-slate-800/50 rounded-lg border border-slate-700"
+              aria-label={isMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              className="flex rounded-lg border border-slate-700 bg-slate-800/50 p-2 text-slate-400 transition-colors hover:text-slate-100 xl:hidden"
             >
               {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
           </div>
         )}
+        </div>
       </nav>
 
       {/* Mobile Menu Overlay */}
       {isMenuOpen && user && (
-        <div className="fixed inset-0 top-16 z-30 bg-slate-950 flex flex-col p-6 animate-in slide-in-from-right duration-200 md:hidden overflow-y-auto pb-12">
+        <div className="fixed inset-0 top-16 z-30 flex flex-col overflow-y-auto bg-slate-950 p-6 pb-12 animate-in slide-in-from-right duration-200 xl:hidden">
           <div className="flex flex-col gap-2 mb-8">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-2">Navigation</p>
             <Link to="/dashboard" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 p-3 rounded-xl transition ${isActive('/dashboard') ? 'bg-cyan-500/10 text-cyan-400' : 'text-slate-300 active:bg-slate-800'}`}>

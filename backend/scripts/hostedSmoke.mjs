@@ -50,6 +50,9 @@ if (!backendUrl) {
 
 const health = await withRetry('Render health', async () => (await fetchOk(`${backendUrl}/health`)).json());
 if (!health.success) throw new Error('Render health response was not successful');
+if (!health.aiAllowances?.global_capacity_configured) {
+  throw new Error('Launch-day AI allowances are not active on the hosted backend');
+}
 
 const readiness = await withRetry('Render dependencies', async () => {
   const response = await fetchOk(`${backendUrl}/ready`);
@@ -75,6 +78,7 @@ console.log(JSON.stringify({
     supabase: readiness.components.supabase,
     redisRealtime: readiness.components.redisRealtime,
     redisRateLimit: readiness.components.redisRateLimit,
+    aiAllowances: health.aiAllowances,
   },
   appVersion: readiness.appVersion,
   timestamp: readiness.timestamp,
