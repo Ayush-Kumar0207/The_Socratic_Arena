@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 test('commercial preview shows regional pricing, usage, and server-gated Pro tools', async ({ page }) => {
   await page.goto('/pricing');
   await expect(page.getByRole('heading', { name: 'Practice reasoning, not just answers.' })).toBeVisible();
+  await page.getByLabel('Billing region').selectOption('IN');
   await expect(page.getByText('₹2,870')).toBeVisible();
   await page.getByLabel('Billing region').selectOption('US');
   await expect(page.getByText('$57.50')).toBeVisible();

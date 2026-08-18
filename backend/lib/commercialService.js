@@ -5,22 +5,9 @@ import {
   getPlan,
   getPublicPlanCatalog,
 } from './commercialConfig.js';
+import { sanitizeProviderUsage, unwrapMeasuredProviderResult } from './providerUsage.js';
 
 const ACTIVE_STATUSES = ['active', 'trialing'];
-const DEFAULT_COST_MICROS = {
-  ai_practice_turn: 2500,
-  ai_practice_score: 8000,
-  evidence_session: 15000,
-  ai_summary: 3000,
-  ai_objection: 4000,
-  tts_character: 2,
-  deep_review: 20000,
-  mentor_turn: 6000,
-  adversarial_turn: 7000,
-  replay_branch: 12000,
-  voice_analysis_minute: 15000,
-};
-
 const monthWindow = (now = new Date()) => ({
   start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(),
   end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
@@ -170,14 +157,15 @@ export const createCommercialService = ({ supabase }) => {
     return { id: result?.reservation_id, remaining: result?.remaining_units, reused: result?.reused, access, requestKey };
   };
 
-  const settle = async ({ userId, reservation, actualUnits = 1, costMicros }) => {
+  const settle = async ({ userId, reservation, actualUnits = 1, providerUsage }) => {
     if (!reservation?.id) return true;
-    const cost = costMicros ?? Math.ceil(actualUnits * (DEFAULT_COST_MICROS[reservation.feature] || 0));
+    const measured = sanitizeProviderUsage(providerUsage);
     const { error } = await supabase.rpc('settle_commercial_usage', {
       p_user_id: userId,
       p_reservation_id: reservation.id,
       p_actual_units: Math.max(0, Math.ceil(actualUnits)),
-      p_cost_micros: Math.max(0, Math.ceil(cost)),
+      p_cost_micros: measured.costMicros,
+      p_metadata: measured.metadata,
     });
     if (error) throw error;
     return true;
@@ -193,9 +181,10 @@ export const createCommercialService = ({ supabase }) => {
     const reservation = await reserve({ userId, feature, units, requestKey, entitlement });
     reservation.feature = feature;
     try {
-      const result = await action({ access: reservation.access, reservation });
-      await settle({ userId, reservation, actualUnits: actualUnits?.(result) ?? units });
-      return { result, remaining: reservation.remaining };
+      const actionResult = await action({ access: reservation.access, reservation });
+      const measured = unwrapMeasuredProviderResult(actionResult);
+      await settle({ userId, reservation, actualUnits: actualUnits?.(measured.value) ?? units, providerUsage: measured.providerUsage });
+      return { result: measured.value, remaining: reservation.remaining, providerUsage: measured.providerUsage };
     } catch (error) {
       await release({ userId, reservation });
       throw error;

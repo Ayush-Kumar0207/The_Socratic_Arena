@@ -32,17 +32,21 @@ Socratic Arena uses one internal subscription model with two adapters:
 - **No Stripe at initial commercial release.** A third provider would add
   reconciliation and support risk without improving the initial regional fit.
 
-Country/currency selection decides the provider on the server. A browser cannot
-substitute a price ID: it sends only plan, interval, and country, and the backend
-looks up an environment-owned provider identifier.
+The country selector is a pricing preview only. Checkout sends only plan and
+interval. The backend selects the provider from a previously provider-verified
+billing country or `BILLING_TRUSTED_COUNTRY_HEADER`, which must be overwritten
+by a trusted edge that clients cannot bypass. Production checkout returns
+`BILLING_REGION_UNVERIFIED` when neither source exists. The non-production-only
+`BILLING_COUNTRY_OVERRIDE` supports local and staging acceptance tests.
 
 ## Isolation and merge safety
 
 1. `main` remains the public beta and is not modified or deployed by this work.
 2. `codex/pro-market` starts at the exact production commit and contains only
    additive routes, tables, pages, and feature-flagged integrations.
-3. `COMMERCIAL_MODE_ENABLED=false` makes metering database-free and preserves all
-   existing launch allowances.
+3. `COMMERCIAL_MODE_ENABLED=false` leaves only the database-free public catalog;
+   every other `/api/commercial` route and both webhook endpoints return 404
+   before authentication, raw-body parsing, provider calls, or database access.
 4. `VITE_COMMERCIAL_MODE_ENABLED=false` hides commercial navigation.
 5. Migration `008_commercial_platform.sql` creates new tables/functions and only
    adds nullable Evidence Vault columns to `evidence_documents`.
@@ -62,7 +66,14 @@ Paddle signatures use the exact raw body plus `Paddle-Signature` timestamp/HMAC.
 Razorpay signatures use the exact raw body plus `X-Razorpay-Signature` HMAC.
 `billing_webhook_events` provides a unique provider event ID, private payload
 audit, status, and error record. Duplicate delivery is acknowledged without
-reapplying state.
+reapplying state, while a previously failed delivery may safely retry.
+
+A first-time subscription is never linked from Paddle `custom_data` or Razorpay
+notes alone. It must match an unexpired, server-created checkout attempt with the
+same provider, mapped price, interval, and billing region. Later events must
+match an already trusted provider subscription ID. Paddle billing country is
+read from the provider address API; Razorpay activation requires a confirmed INR
+payment. A mismatch is audited and ignored without granting entitlements.
 
 ## Usage and abuse protection
 
@@ -78,9 +89,34 @@ Every plan has both:
   consuming an entire month at once.
 
 Global launch capacity limits remain active even for paid users. “Unlimited AI”
-is not advertised. The private cost endpoint aggregates measured settled usage
-for platform administrators; unit-cost estimates in `ai_unit_cost_rates` should
-be updated from actual provider invoices.
+is not advertised.
+
+### Measured cost accounting
+
+Settled usage records actual Gemini input, cached-input, output, and thinking
+tokens from provider response metadata. Polly records the exact synthesized
+character count, engine, and AWS request ID. The rate used for every call is
+stored with that event, so later rate changes do not rewrite history. Missing
+measurement is explicitly marked `unmeasured` and costs zero rather than using a
+fictional feature estimate.
+
+`GET /api/commercial/internal/costs` returns measured cost by feature and user,
+including measured/unmeasured coverage. After an actual Google or AWS invoice
+arrives, a platform administrator posts its period and total to
+`POST /api/commercial/internal/costs/reconcile`. The stored allocation ratio
+turns measured list cost into invoice-reconciled cost without losing the raw
+token/character ledger. Provider prices are configurable in the environment and
+recorded in `provider_cost_rates` with source URLs and effective dates.
+
+### Voice Pro privacy and measurements
+
+Voice Pro can record directly in Pro Studio. Web Audio calculates frame-level
+RMS, voiced ratio, pauses and hesitation timing, pitch and pitch variation,
+volume dynamics, speaking rate, filler frequency, and an abrupt-cutoff indicator
+inside the browser. Only bounded measurements and the user-approved transcript
+are uploaded; raw audio remains local and can be replayed only in that browser
+session. Transcript-only analysis remains available and must label acoustic
+traits `not_measured`.
 
 ### Whose Gemini quota is used?
 
@@ -124,6 +160,12 @@ initial abuse boundary.
 Never commit credentials, copy a live provider secret into a preview, or reuse a
 webhook secret as an API key.
 
+After adding test credentials, run `npm run verify:commercial` in `backend`.
+It fetches every Paddle price and Razorpay plan from the provider, verifies
+currency, amount, interval, active state, regional-header configuration, and an
+optional deployed catalog. It prints no secrets. This is a configuration gate,
+not a substitute for completing the interactive provider checkout scenarios.
+
 ## Activation checklist
 
 1. Merge the latest `main` into `codex/pro-market` and run the full suite.
@@ -133,11 +175,13 @@ webhook secret as an API key.
    backend flag false and verify pricing/legal pages remain safe.
 5. Enable `COMMERCIAL_MODE_ENABLED=true` in preview.
 6. Complete Plus and Premium purchases through both providers.
-7. Replay webhook deliveries and confirm one subscription/one event application.
+7. Replay webhook deliveries and confirm one subscription/one event application,
+   then tamper with checkout custom data and confirm no entitlement is granted.
 8. Test renew, past due, halt, cancel at period end, immediate cancellation,
    refund, and chargeback states.
 9. Run concurrency tests against the reserve/settle ledger and verify daily and
-   monthly friendly-limit messages.
+   monthly friendly-limit messages. Confirm token/character metadata appears in
+   the cost dashboard and reconcile it to a provider test invoice/export.
 10. Obtain legal/tax review of the draft Terms, Privacy, and Refund pages.
 11. Create a database restore point, switch provider credentials to live, and
     deploy backend before the frontend flag.
@@ -154,7 +198,8 @@ live. Database objects are additive and should remain for audit and a safe retry
 ## What still requires owner/provider action
 
 Code cannot create verified live merchant accounts, complete KYC, accept provider
-terms, choose the legal seller name, or obtain live secrets. Those actions must
-be completed in the Paddle and Razorpay dashboards before commercial activation.
-The implementation deliberately returns `BILLING_NOT_CONFIGURED` instead of
-falling back to an unsafe or user-supplied price.
+terms, choose the legal seller name, obtain live secrets, manufacture a real
+provider invoice, or provide jurisdiction-specific legal approval. Those actions
+must be completed by the owner/providers/counsel before commercial activation.
+The implementation deliberately fails closed instead of falling back to an
+unsafe region, user-supplied price, or unverified entitlement.

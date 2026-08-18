@@ -134,6 +134,8 @@ create table if not exists public.billing_checkout_attempts (
   provider text not null check (provider in ('paddle','razorpay')),
   plan_code text not null references public.commercial_plans(code),
   billing_interval text not null check (billing_interval in ('monthly','annual')),
+  billing_country char(2) not null,
+  country_source text not null,
   status text not null default 'initiated' check (status in ('initiated','completed','failed','expired')),
   checkout_payload jsonb,
   expires_at timestamptz not null default (now() + interval '30 minutes'),
@@ -145,23 +147,43 @@ create unique index if not exists idx_checkout_attempt_user_initiated
   on public.billing_checkout_attempts(user_id)
   where status = 'initiated';
 
-create table if not exists public.ai_unit_cost_rates (
-  feature_key text primary key,
-  unit_name text not null,
-  cost_micros_per_unit bigint not null check (cost_micros_per_unit >= 0),
-  effective_at timestamptz not null default now(),
-  notes text
+create table if not exists public.provider_cost_rates (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  service text not null,
+  model text not null,
+  unit_type text not null,
+  usd_per_million numeric(14,6) not null check (usd_per_million >= 0),
+  source_url text not null,
+  effective_at timestamptz not null,
+  retired_at timestamptz,
+  unique (provider, service, model, unit_type, effective_at)
 );
 
-insert into public.ai_unit_cost_rates (feature_key, unit_name, cost_micros_per_unit, notes) values
-  ('ai_practice_turn', 'turn', 2500, 'Editable planning estimate; replace with measured blended cost.'),
-  ('ai_practice_score', 'score', 8000, 'Editable planning estimate; replace with measured blended cost.'),
-  ('deep_review', 'review', 20000, 'Editable planning estimate; replace with measured blended cost.'),
-  ('mentor_turn', 'turn', 6000, 'Editable planning estimate; replace with measured blended cost.'),
-  ('adversarial_turn', 'turn', 7000, 'Editable planning estimate; replace with measured blended cost.'),
-  ('replay_branch', 'branch', 12000, 'Editable planning estimate; replace with measured blended cost.'),
-  ('voice_analysis_minute', 'minute', 15000, 'Editable planning estimate; replace with measured blended cost.')
-on conflict (feature_key) do nothing;
+insert into public.provider_cost_rates (provider, service, model, unit_type, usd_per_million, source_url, effective_at) values
+  ('google-gemini', 'generate-content', 'gemini-2.5-flash', 'input_token', 0.30, 'https://ai.google.dev/gemini-api/docs/pricing', '2026-08-01T00:00:00Z'),
+  ('google-gemini', 'generate-content', 'gemini-2.5-flash', 'cached_input_token', 0.03, 'https://ai.google.dev/gemini-api/docs/pricing', '2026-08-01T00:00:00Z'),
+  ('google-gemini', 'generate-content', 'gemini-2.5-flash', 'output_or_thinking_token', 2.50, 'https://ai.google.dev/gemini-api/docs/pricing', '2026-08-01T00:00:00Z'),
+  ('amazon-polly', 'synthesize-speech', 'standard', 'character', 4.00, 'https://aws.amazon.com/polly/pricing/', '2026-08-01T00:00:00Z'),
+  ('amazon-polly', 'synthesize-speech', 'neural', 'character', 16.00, 'https://aws.amazon.com/polly/pricing/', '2026-08-01T00:00:00Z'),
+  ('amazon-polly', 'synthesize-speech', 'long-form', 'character', 100.00, 'https://aws.amazon.com/polly/pricing/', '2026-08-01T00:00:00Z'),
+  ('amazon-polly', 'synthesize-speech', 'generative', 'character', 30.00, 'https://aws.amazon.com/polly/pricing/', '2026-08-01T00:00:00Z')
+on conflict do nothing;
+
+create table if not exists public.provider_cost_reconciliations (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null,
+  period_start timestamptz not null,
+  period_end timestamptz not null check (period_end > period_start),
+  currency char(3) not null default 'USD',
+  invoice_total_micros bigint not null check (invoice_total_micros >= 0),
+  measured_cost_micros bigint not null check (measured_cost_micros >= 0),
+  allocation_ratio numeric(18,8) not null check (allocation_ratio >= 0),
+  invoice_reference text,
+  created_by uuid not null references auth.users(id),
+  created_at timestamptz not null default now(),
+  unique (provider, period_start, period_end)
+);
 
 create table if not exists public.reasoning_progress_snapshots (
   id uuid primary key default gen_random_uuid(),
@@ -216,6 +238,8 @@ create table if not exists public.voice_analyses (
   user_id uuid not null references auth.users(id) on delete cascade,
   match_id uuid references public.matches(id) on delete set null,
   duration_seconds integer not null default 0 check (duration_seconds >= 0),
+  analysis_mode text not null default 'transcript' check (analysis_mode in ('transcript','acoustic')),
+  acoustic_metrics jsonb,
   analysis jsonb not null,
   created_at timestamptz not null default now()
 );
@@ -431,7 +455,8 @@ create or replace function public.settle_commercial_usage(
   p_user_id uuid,
   p_reservation_id uuid,
   p_actual_units bigint,
-  p_cost_micros bigint default 0
+  p_cost_micros bigint default 0,
+  p_metadata jsonb default '{}'::jsonb
 )
 returns boolean
 language plpgsql
@@ -467,8 +492,8 @@ begin
       and period_end > v_reservation.created_at;
   end if;
 
-  insert into public.commercial_usage_events (user_id, reservation_id, feature_key, event_type, units, cost_micros)
-  values (p_user_id, p_reservation_id, v_reservation.feature_key, 'settled', greatest(0, p_actual_units), greatest(0, p_cost_micros));
+  insert into public.commercial_usage_events (user_id, reservation_id, feature_key, event_type, units, cost_micros, metadata)
+  values (p_user_id, p_reservation_id, v_reservation.feature_key, 'settled', greatest(0, p_actual_units), greatest(0, p_cost_micros), coalesce(p_metadata, '{}'::jsonb));
   return true;
 end;
 $$;
@@ -509,7 +534,7 @@ begin
   foreach table_name in array array[
     'commercial_plans','billing_customers','commercial_subscriptions','entitlement_overrides',
     'commercial_usage_balances','commercial_usage_reservations','commercial_usage_events',
-    'billing_webhook_events','billing_checkout_attempts','ai_unit_cost_rates','reasoning_progress_snapshots','mentor_memories',
+    'billing_webhook_events','billing_checkout_attempts','provider_cost_rates','provider_cost_reconciliations','reasoning_progress_snapshots','mentor_memories',
     'replay_branches','deep_reviews','voice_analyses','evidence_vault_collections','organizations',
     'organization_members','organization_usage_pools','organization_audit_logs','organization_assets','sales_leads'
   ] loop
@@ -536,10 +561,10 @@ create policy "users read own evidence vaults" on public.evidence_vault_collecti
   for select to authenticated using (auth.uid() = user_id);
 
 revoke all on function public.reserve_commercial_usage(uuid,text,bigint,text,timestamptz,timestamptz,bigint,bigint,uuid) from public, anon, authenticated;
-revoke all on function public.settle_commercial_usage(uuid,uuid,bigint,bigint) from public, anon, authenticated;
+revoke all on function public.settle_commercial_usage(uuid,uuid,bigint,bigint,jsonb) from public, anon, authenticated;
 revoke all on function public.release_commercial_usage(uuid,uuid) from public, anon, authenticated;
 grant execute on function public.reserve_commercial_usage(uuid,text,bigint,text,timestamptz,timestamptz,bigint,bigint,uuid) to service_role;
-grant execute on function public.settle_commercial_usage(uuid,uuid,bigint,bigint) to service_role;
+grant execute on function public.settle_commercial_usage(uuid,uuid,bigint,bigint,jsonb) to service_role;
 grant execute on function public.release_commercial_usage(uuid,uuid) to service_role;
 
 comment on table public.commercial_subscriptions is 'Provider-neutral subscription truth synchronized only from verified server webhooks.';

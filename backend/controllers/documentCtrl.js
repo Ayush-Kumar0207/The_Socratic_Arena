@@ -3,6 +3,7 @@ import { parseAndChunkPdf } from '../services/ai/rag.js';
 import { createKnowledgeBase, createAgents } from '../services/ai/agents.js';
 import { runDebate } from '../services/ai/debate.js';
 import { evaluateGrounding } from '../services/ai/evidenceEvaluator.js';
+import { aggregateProviderUsages } from '../lib/providerUsage.js';
 
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -93,6 +94,7 @@ export const createHandleDebateUpload = ({ supabase, commercial = null }) => asy
     (async () => {
       let knowledgeBase = null;
       let completed = false;
+      const providerUsages = [];
       try {
         emitStatus('parsing', { rounds });
         const { chunks } = await parseAndChunkPdf(req.file.buffer);
@@ -120,7 +122,7 @@ export const createHandleDebateUpload = ({ supabase, commercial = null }) => asy
           vaultCollectionId,
           retainedUntil,
         });
-        const { defender, critic } = await createAgents(knowledgeBase.retriever);
+        const { defender, critic } = await createAgents(knowledgeBase.retriever, { onUsage: usage => providerUsages.push(usage) });
 
         emitStatus('retrieving', {
           vectorBackend: knowledgeBase.vectorBackend,
@@ -142,7 +144,7 @@ export const createHandleDebateUpload = ({ supabase, commercial = null }) => asy
 
         if (shouldCancel()) throw new Error('CANCELLED_DEBATE: Session stopped before evaluation.');
         emitStatus('evaluating');
-        const evaluation = await evaluateGrounding({ topic, transcript });
+        const evaluation = await evaluateGrounding({ topic, transcript, onUsage: usage => providerUsages.push(usage) });
         emitStatus('completed');
         io.to(socketId).emit('debate_complete', {
           success: true,
@@ -185,7 +187,7 @@ export const createHandleDebateUpload = ({ supabase, commercial = null }) => asy
       } finally {
         if (commercial && usageReservation) {
           try {
-            if (completed) await commercial.settle({ userId: req.user.id, reservation: usageReservation, actualUnits: 1 });
+            if (completed) await commercial.settle({ userId: req.user.id, reservation: usageReservation, actualUnits: 1, providerUsage: aggregateProviderUsages(providerUsages) });
             else await commercial.release({ userId: req.user.id, reservation: usageReservation });
           } catch (usageError) {
             console.warn('[Evidence Arena] Usage settlement failed:', usageError.message);

@@ -36,15 +36,17 @@ const loadScript = (src, globalName) => new Promise((resolve, reject) => {
   document.head.appendChild(script);
 });
 
-export const beginCheckout = async ({ planCode, interval, countryCode, onSuccess }) => {
-  const storageKey = `socratic-checkout:${planCode}:${interval}:${countryCode}`;
+export const beginCheckout = async ({ planCode, interval, onSuccess }) => {
+  const storageKey = `socratic-checkout:${planCode}:${interval}`;
   const requestId = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   sessionStorage.setItem(storageKey, requestId);
   const complete = event => {
     sessionStorage.removeItem(storageKey);
     onSuccess?.(event);
   };
-  const { data } = await api.post('/commercial/checkout', { planCode, interval, countryCode }, { headers: { 'Idempotency-Key': requestId } });
+  // The region selector previews prices only. Checkout country/provider is
+  // resolved server-side from a provider-verified customer or trusted proxy.
+  const { data } = await api.post('/commercial/checkout', { planCode, interval }, { headers: { 'Idempotency-Key': requestId } });
   const checkout = data.checkout;
   if (checkout.provider === 'paddle') {
     const Paddle = await loadScript('https://cdn.paddle.com/paddle/v2/paddle.js', 'Paddle');

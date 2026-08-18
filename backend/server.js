@@ -40,6 +40,7 @@ import './auto_seed.js';
 
 // Import Google Generative AI for debate evaluation
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { buildGeminiUsage, measuredProviderResult } from './lib/providerUsage.js';
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -48,23 +49,32 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * Robust Google Gemini API Wrapper
  * Implements Exponential Backoff Retries and safe JSON parsing.
  */
-async function generateWithRetry(prompt, maxRetries = 3, expectJson = true) {
+async function generateWithRetry(prompt, maxRetries = 3, expectJson = true, options = {}) {
   let attempt = 0;
   const mode = expectJson ? 'json' : 'text';
   const startedAt = Date.now();
 
   while (attempt < maxRetries) {
     try {
+      const modelName = process.env.GEMINI_GENERATION_MODEL || 'gemini-2.5-flash';
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: modelName,
         generationConfig: expectJson ? { responseMimeType: "application/json" } : {}
       });
       const result = await model.generateContent(prompt);
       const text = result.response.text();
 
+      const withUsage = value => options.includeUsage
+        ? measuredProviderResult(value, buildGeminiUsage({
+          usageMetadata: result.response.usageMetadata || {},
+          model: modelName,
+          requestId: result.response.responseId || result.response.id || null,
+        }))
+        : value;
+
       if (!expectJson) {
         recordAiRequest({ status: 'success', mode, durationSeconds: (Date.now() - startedAt) / 1000 });
-        return text;
+        return withUsage(text);
       }
 
       // Safe JSON parse
@@ -74,7 +84,7 @@ async function generateWithRetry(prompt, maxRetries = 3, expectJson = true) {
 
       const parsed = JSON.parse(match[0]);
       recordAiRequest({ status: 'success', mode, durationSeconds: (Date.now() - startedAt) / 1000 });
-      return parsed;
+      return withUsage(parsed);
     } catch (err) {
       attempt++;
       console.error(`[AI Helper] Gemini call failed (attempt ${attempt}/${maxRetries}):`, err.message);
@@ -585,7 +595,11 @@ if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
 // Billing providers sign the exact raw bytes they send. This route must stay
 // ahead of express.json(); verified events update only the isolated commercial
 // subscription tables and cannot change public-beta match behavior.
-app.use('/api/commercial/webhooks', createCommercialWebhookRoutes({ supabase }));
+if (commercialModeEnabled()) {
+  app.use('/api/commercial/webhooks', createCommercialWebhookRoutes({ supabase }));
+} else {
+  app.use('/api/commercial/webhooks', (_req, res) => res.status(404).json({ success: false, code: 'COMMERCIAL_MODE_DISABLED' }));
+}
 
 /**
  * Basic Middleware Configuration
@@ -767,7 +781,7 @@ app.post(
       feature: 'ai_summary',
       entitlement: 'ai_sparring',
       requestKey: req.get('idempotency-key') || `summary:${id}`,
-      action: () => generateWithRetry(prompt, 3, false),
+      action: () => generateWithRetry(prompt, 3, false, { includeUsage: true }),
     });
     let summary = metered.result;
 
@@ -2056,7 +2070,7 @@ io.on('connection', (socket) => {
         feature: 'ai_objection',
         entitlement: 'ai_sparring',
         requestKey: `objection:${roomId}:${targetMessageId}:${callerId}`,
-        action: () => generateWithRetry(prompt, 3, true),
+        action: () => generateWithRetry(prompt, 3, true, { includeUsage: true }),
       });
       const aiResponse = metered.result;
 

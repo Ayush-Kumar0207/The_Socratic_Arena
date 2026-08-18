@@ -171,7 +171,7 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
           units: text.length,
           entitlement: 'ai_sparring',
           requestKey: req.get('idempotency-key') || `tts:${crypto.randomUUID()}`,
-          action: () => ttsService.synthesize(text),
+          action: () => ttsService.synthesizeMeasured(text),
         });
         const audio = metered.result;
         res.set({

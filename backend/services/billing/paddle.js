@@ -46,6 +46,12 @@ export const createPaddlePortalSession = async ({ customerId }, fetchImpl = fetc
   };
 };
 
+export const fetchPaddleBillingCountry = async ({ customerId, addressId }, fetchImpl = fetch) => {
+  if (!customerId || !addressId) return null;
+  const address = await paddleFetch(`/customers/${encodeURIComponent(customerId)}/addresses/${encodeURIComponent(addressId)}`, { method: 'GET' }, fetchImpl);
+  return String(address?.country_code || '').trim().toUpperCase() || null;
+};
+
 export const cancelPaddleSubscription = async ({ subscriptionId, atPeriodEnd = true }, fetchImpl = fetch) => {
   const data = await paddleFetch(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
     method: 'POST',

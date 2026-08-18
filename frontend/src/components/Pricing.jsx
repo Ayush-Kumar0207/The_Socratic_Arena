@@ -34,7 +34,6 @@ export default function Pricing({ user }) {
       await beginCheckout({
         planCode: plan.code,
         interval,
-        countryCode: country,
         onSuccess: () => {
           setMessage('Payment received. We are securely confirming your subscription.');
           setTimeout(() => navigate('/billing'), 1200);
@@ -103,7 +102,7 @@ export default function Pricing({ user }) {
 
         <div className="mt-12 grid gap-5 rounded-3xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400 md:grid-cols-3">
           <div><strong className="block text-slate-100">No “unlimited AI” trap</strong><span>Every plan shows durable monthly allowances and a daily safety ceiling.</span></div>
-          <div><strong className="block text-slate-100">Regional checkout</strong><span>Razorpay serves India in INR; Paddle serves international customers.</span></div>
+          <div><strong className="block text-slate-100">Verified regional checkout</strong><span>The selector previews prices. Your secure checkout provider is confirmed server-side.</span></div>
           <div><strong className="block text-slate-100">Cancel transparently</strong><span>Manage renewal and usage from Billing. Provider confirmation is always authoritative.</span></div>
         </div>
         <div className="mt-8 text-center text-xs text-slate-600">

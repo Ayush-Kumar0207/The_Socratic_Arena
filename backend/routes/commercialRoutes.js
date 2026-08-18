@@ -4,10 +4,45 @@ import { commercialModeEnabled, getPublicPlanCatalog, resolveCheckoutProduct } f
 import { createCommercialService } from '../lib/commercialService.js';
 import { createBillingService } from '../services/billing/index.js';
 import { createRateLimit } from '../lib/rateLimit.js';
+import { resolveTrustedRequestCountry } from '../lib/billingRegion.js';
+import { unwrapMeasuredProviderResult } from '../lib/providerUsage.js';
 
 const cleanText = (value, max = 2000) => String(value || '').trim().slice(0, max);
 const slugify = value => cleanText(value, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 63);
 const isUuid = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || '');
+const boundedNumber = (value, min, max) => Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : null;
+const transcriptMetrics = (transcript, durationSeconds) => {
+  const words = transcript.match(/[\p{L}\p{N}'’-]+/gu) || [];
+  const fillers = transcript.match(/\b(?:um+|uh+|erm+|hmm+|like|you know|sort of|kind of)\b/gi) || [];
+  const minutes = Math.max(1 / 60, durationSeconds / 60);
+  return { wordCount: words.length, wordsPerMinute: Number((words.length / minutes).toFixed(1)), fillerCount: fillers.length, fillersPerMinute: Number((fillers.length / minutes).toFixed(1)) };
+};
+const sanitizeAcousticMetrics = (value, transcript, durationSeconds) => {
+  if (!value || typeof value !== 'object' || value.version !== 'browser-acoustic-v1') return null;
+  const metrics = {
+    version: 'browser-acoustic-v1',
+    durationSeconds: boundedNumber(value.durationSeconds, 1, 3600),
+    sampleRate: boundedNumber(value.sampleRate, 8000, 192000),
+    channelCount: boundedNumber(value.channelCount, 1, 8),
+    analyzedFrames: boundedNumber(value.analyzedFrames, 1, 500000),
+    voicedRatio: boundedNumber(value.voicedRatio, 0, 1),
+    pauseCount: boundedNumber(value.pauseCount, 0, 10000),
+    hesitationPauseCount: boundedNumber(value.hesitationPauseCount, 0, 10000),
+    longPauseCount: boundedNumber(value.longPauseCount, 0, 10000),
+    averagePauseSeconds: boundedNumber(value.averagePauseSeconds, 0, 3600),
+    longestPauseSeconds: boundedNumber(value.longestPauseSeconds, 0, 3600),
+    pitchMeanHz: boundedNumber(value.pitchMeanHz, 0, 1000),
+    pitchVariationSemitones: boundedNumber(value.pitchVariationSemitones, 0, 48),
+    pitchSamples: boundedNumber(value.pitchSamples, 0, 500000),
+    volumeMeanRms: boundedNumber(value.volumeMeanRms, 0, 1),
+    volumeVariation: boundedNumber(value.volumeVariation, 0, 20),
+    dynamicRangeDb: boundedNumber(value.dynamicRangeDb, 0, 120),
+    abruptCutoffIndicator: Boolean(value.abruptCutoffIndicator),
+    pauses: Array.isArray(value.pauses) ? value.pauses.slice(0, 40).map(item => ({ startSeconds: boundedNumber(item?.startSeconds, 0, 3600), durationSeconds: boundedNumber(item?.durationSeconds, 0, 3600) })).filter(item => item.startSeconds !== null && item.durationSeconds !== null) : [],
+  };
+  if (!metrics.durationSeconds || !metrics.sampleRate || !metrics.analyzedFrames) return null;
+  return { ...metrics, ...transcriptMetrics(transcript, durationSeconds) };
+};
 
 const jsonError = (res, error) => res.status(error.statusCode || 500).json({
   success: false,
@@ -56,6 +91,12 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
     ...getPublicPlanCatalog({ countryCode: req.query.country, currency: req.query.currency }),
   }));
 
+  // Catalog is deliberately public and database-free. Every other commercial
+  // route fails closed while the feature is disabled, before auth or DB access.
+  router.use((req, res, next) => commercialModeEnabled()
+    ? next()
+    : res.status(404).json({ success: false, code: 'COMMERCIAL_MODE_DISABLED', message: 'Commercial features are not enabled in this environment.' }));
+
   router.use(authenticate(supabase));
   router.use(createRateLimit({ name: 'commercial-user', max: 180, windowMs: 10 * 60_000, key: req => req.user.id }));
 
@@ -69,7 +110,6 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
   });
 
   router.post('/checkout', async (req, res) => {
-    if (!commercialModeEnabled()) return res.status(404).json({ success: false, code: 'COMMERCIAL_MODE_DISABLED', message: 'Checkout is not enabled in this environment.' });
     try {
       const existing = await rows(supabase.from('commercial_subscriptions').select('id,status,provider,plan_code').eq('user_id', req.user.id).in('status', ['pending', 'authenticated', 'trialing', 'active', 'past_due', 'halted']).order('updated_at', { ascending: false }).limit(1));
       if (existing[0]) {
@@ -81,8 +121,10 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
       if (priorAttempts[0]?.status === 'initiated' && priorAttempts[0].checkout_payload) {
         return res.status(200).json({ success: true, checkout: priorAttempts[0].checkout_payload, reused: true });
       }
-      const product = resolveCheckoutProduct({ planCode: req.body.planCode, interval: req.body.interval, countryCode: req.body.countryCode, currency: req.body.currency });
-      const { error: attemptError } = await supabase.from('billing_checkout_attempts').insert({ id: requestId, user_id: req.user.id, provider: product.provider, plan_code: product.planCode, billing_interval: product.interval });
+      const customers = await rows(supabase.from('billing_customers').select('billing_country,updated_at').eq('user_id', req.user.id).not('billing_country', 'is', null).order('updated_at', { ascending: false }).limit(1));
+      const trustedRegion = resolveTrustedRequestCountry({ req, storedCountry: customers[0]?.billing_country });
+      const product = resolveCheckoutProduct({ planCode: req.body.planCode, interval: req.body.interval, countryCode: trustedRegion.countryCode });
+      const { error: attemptError } = await supabase.from('billing_checkout_attempts').insert({ id: requestId, user_id: req.user.id, provider: product.provider, plan_code: product.planCode, billing_interval: product.interval, billing_country: trustedRegion.countryCode, country_source: trustedRegion.source });
       if (attemptError?.code === '23505') return res.status(409).json({ success: false, code: 'CHECKOUT_ALREADY_IN_PROGRESS', message: 'A checkout is already open for this account. Complete it or wait 30 minutes before starting another.' });
       if (attemptError) throw attemptError;
       let checkout;
@@ -90,12 +132,11 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         checkout = await billing.createCheckout({
         planCode: req.body.planCode,
         interval: req.body.interval,
-        countryCode: req.body.countryCode,
-        currency: req.body.currency,
         user: req.user,
           requestId,
           product,
         });
+        checkout = { ...checkout, billingCountry: trustedRegion.countryCode, countrySource: trustedRegion.source };
         await supabase.from('billing_checkout_attempts').update({ checkout_payload: checkout, updated_at: new Date().toISOString() }).eq('id', requestId);
       } catch (checkoutError) {
         await supabase.from('billing_checkout_attempts').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', requestId);
@@ -141,7 +182,7 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         rows(supabase.from('mentor_memories').select('*').eq('user_id', req.user.id).eq('active', true).order('updated_at', { ascending: false }).limit(30)),
         rows(supabase.from('replay_branches').select('id,match_id,branch_from_turn,alternate_response,analysis,created_at').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(30)),
         rows(supabase.from('deep_reviews').select('id,match_id,review,judge_version,created_at').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(30)),
-        rows(supabase.from('voice_analyses').select('id,match_id,duration_seconds,analysis,created_at').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(30)),
+        rows(supabase.from('voice_analyses').select('id,match_id,duration_seconds,analysis_mode,acoustic_metrics,analysis,created_at').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(30)),
         rows(supabase.from('evidence_vault_collections').select('id,name,description,retention_days,created_at,updated_at').eq('user_id', req.user.id).order('updated_at', { ascending: false })),
         rows(supabase.from('organization_members').select('organization_id,role,status').eq('user_id', req.user.id).eq('status', 'active')),
       ]);
@@ -186,11 +227,12 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
             rows(supabase.from('mentor_memories').select('memory_type,content,evidence').eq('user_id', req.user.id).eq('active', true).order('updated_at', { ascending: false }).limit(12)),
             rows(supabase.from('matches').select('id,topic,ai_scores,created_at').or(`critic_id.eq.${req.user.id},defender_id.eq.${req.user.id}`).eq('status', 'completed').order('created_at', { ascending: false }).limit(8)),
           ]);
-          const response = await generateWithRetry(`You are the user's private Socratic Mentor. Use their measured profile and history, do not flatter, and never invent evidence. Return JSON with keys answer (under 220 words), probing_question, observed_pattern, next_drill, and memory (a concise durable preference/goal/weakness worth remembering, or null).\n\nProfile: ${JSON.stringify(profiles[0] || {})}\nMemories: ${JSON.stringify(memories)}\nRecent matches: ${JSON.stringify(recentMatches)}\nUser: ${message}`);
+          const generated = await generateWithRetry(`You are the user's private Socratic Mentor. Use their measured profile and history, do not flatter, and never invent evidence. Return JSON with keys answer (under 220 words), probing_question, observed_pattern, next_drill, and memory (a concise durable preference/goal/weakness worth remembering, or null).\n\nProfile: ${JSON.stringify(profiles[0] || {})}\nMemories: ${JSON.stringify(memories)}\nRecent matches: ${JSON.stringify(recentMatches)}\nUser: ${message}`, 3, true, { includeUsage: true });
+          const response = unwrapMeasuredProviderResult(generated).value;
           if (response.memory) {
             await supabase.from('mentor_memories').insert({ user_id: req.user.id, memory_type: 'session_summary', content: cleanText(response.memory, 1000), evidence: { source: 'mentor_session' } });
           }
-          return response;
+          return generated;
         },
       });
       return res.json({ success: true, response: metered.result, remaining: metered.remaining });
@@ -211,7 +253,7 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         feature: 'adversarial_turn',
         entitlement: 'adversarial_training',
         requestKey: req.get('idempotency-key') || `adversarial:${crypto.randomUUID()}`,
-        action: async () => generateWithRetry(`Act as an ${difficulty} but intellectually honest adversarial trainer. The learner argues ${position} the topic. Steelman the strongest opposing case; identify the most vulnerable premise; present one counterexample; ask one cross-examination question; and provide a hidden coach_note explaining what skill is being tested. Return JSON with steelman, vulnerable_premise, counterexample, cross_examination_question, coach_note, and difficulty. Never invent citations.\n\nTopic: ${topic}\nLearner argument: ${argument}`),
+        action: async () => generateWithRetry(`Act as an ${difficulty} but intellectually honest adversarial trainer. The learner argues ${position} the topic. Steelman the strongest opposing case; identify the most vulnerable premise; present one counterexample; ask one cross-examination question; and provide a hidden coach_note explaining what skill is being tested. Return JSON with steelman, vulnerable_premise, counterexample, cross_examination_question, coach_note, and difficulty. Never invent citations.\n\nTopic: ${topic}\nLearner argument: ${argument}`, 3, true, { includeUsage: true }),
       });
       return res.json({ success: true, response: metered.result, remaining: metered.remaining });
     } catch (error) {
@@ -227,7 +269,7 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         feature: 'deep_review',
         entitlement: 'deep_review',
         requestKey: req.get('idempotency-key') || `deep-review:${match.id}`,
-        action: async () => generateWithRetry(`Perform a private, non-ranking Deep Review of this completed debate. Return JSON with executive_summary, strongest_move, missed_opportunity, claim_audit (array), rebuttal_map (array), reasoning_metrics, three_drills (array), and a concise next_match_plan. Do not alter or second-guess the official result.\n\nMatch: ${JSON.stringify(match)}`),
+        action: async () => generateWithRetry(`Perform a private, non-ranking Deep Review of this completed debate. Return JSON with executive_summary, strongest_move, missed_opportunity, claim_audit (array), rebuttal_map (array), reasoning_metrics, three_drills (array), and a concise next_match_plan. Do not alter or second-guess the official result.\n\nMatch: ${JSON.stringify(match)}`, 3, true, { includeUsage: true }),
       });
       const saved = await rows(supabase.from('deep_reviews').upsert({ user_id: req.user.id, match_id: match.id, review: metered.result }, { onConflict: 'user_id,match_id' }).select());
       return res.status(201).json({ success: true, review: saved[0], remaining: metered.remaining });
@@ -247,7 +289,7 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         feature: 'replay_branch',
         entitlement: 'replay_lab',
         requestKey: req.get('idempotency-key') || `replay:${match.id}:${crypto.createHash('sha256').update(`${branch}:${alternate}`).digest('hex').slice(0, 24)}`,
-        action: async () => generateWithRetry(`Analyze an alternate-reality replay of a debate turn. Return JSON with likely_opponent_reply, outcome_delta (not a ranking change), strengths, risks, improved_version, and lesson. Be calibrated about counterfactual uncertainty.\n\nOriginal match: ${JSON.stringify(match)}\nBranch turn: ${branch}\nAlternate response: ${alternate}`),
+        action: async () => generateWithRetry(`Analyze an alternate-reality replay of a debate turn. Return JSON with likely_opponent_reply, outcome_delta (not a ranking change), strengths, risks, improved_version, and lesson. Be calibrated about counterfactual uncertainty.\n\nOriginal match: ${JSON.stringify(match)}\nBranch turn: ${branch}\nAlternate response: ${alternate}`, 3, true, { includeUsage: true }),
       });
       const saved = await rows(supabase.from('replay_branches').insert({ user_id: req.user.id, match_id: match.id, branch_from_turn: branch, alternate_response: alternate, analysis: metered.result }).select());
       return res.status(201).json({ success: true, replay: saved[0], remaining: metered.remaining });
@@ -258,8 +300,10 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
 
   router.post('/voice-analyses', async (req, res) => {
     const transcript = cleanText(req.body?.transcript, 12000);
-    const durationSeconds = Math.min(3600, Math.max(1, Number(req.body?.durationSeconds) || 60));
+    const durationSeconds = Math.min(3600, Math.max(1, Math.ceil(Number(req.body?.durationSeconds) || 60)));
     if (!transcript) return res.status(400).json({ success: false, message: 'A speech transcript is required.' });
+    const acousticMetrics = sanitizeAcousticMetrics(req.body?.acousticMetrics, transcript, durationSeconds);
+    const analysisMode = acousticMetrics ? 'acoustic' : 'transcript';
     const minutes = Math.max(1, Math.ceil(durationSeconds / 60));
     try {
       const metered = await commercial.runMetered({
@@ -268,9 +312,9 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
         units: minutes,
         entitlement: 'voice_pro',
         requestKey: req.get('idempotency-key') || `voice:${crypto.randomUUID()}`,
-        action: async () => generateWithRetry(`Analyze delivery using only the supplied transcript and timing. Return JSON with pacing, clarity, concision, filler_risk, emotional_control, emphasis_suggestions, rewritten_opening, and three_delivery_drills. State that acoustic traits cannot be inferred from text.\n\nDuration seconds: ${durationSeconds}\nTranscript: ${transcript}`),
+        action: async () => generateWithRetry(`You are a precise speaking coach. Return JSON with analysis_mode, pacing, pause_control, pitch_variation, volume_dynamics, clarity, concision, filler_timing, emotional_control, cutoff_or_interruption_risk, emphasis_suggestions, rewritten_opening, and three_delivery_drills. Use only the supplied measurements. If acoustic metrics are absent, explicitly mark acoustic fields as not_measured; never infer pitch, pauses, or volume from text. An abruptCutoffIndicator is only an ending-energy signal, not proof another speaker interrupted.\n\nAnalysis mode: ${analysisMode}\nDuration seconds: ${durationSeconds}\nServer-derived transcript metrics: ${JSON.stringify(transcriptMetrics(transcript, durationSeconds))}\nOn-device acoustic metrics: ${JSON.stringify(acousticMetrics)}\nTranscript: ${transcript}`, 3, true, { includeUsage: true }),
       });
-      const saved = await rows(supabase.from('voice_analyses').insert({ user_id: req.user.id, match_id: isUuid(req.body?.matchId) ? req.body.matchId : null, duration_seconds: durationSeconds, analysis: metered.result }).select());
+      const saved = await rows(supabase.from('voice_analyses').insert({ user_id: req.user.id, match_id: isUuid(req.body?.matchId) ? req.body.matchId : null, duration_seconds: durationSeconds, analysis_mode: analysisMode, acoustic_metrics: acousticMetrics, analysis: metered.result }).select());
       return res.status(201).json({ success: true, analysis: saved[0], remaining: metered.remaining });
     } catch (error) {
       return jsonError(res, error);
@@ -471,14 +515,75 @@ export default function createCommercialRoutes({ supabase, generateWithRetry }) 
   router.get('/internal/costs', requirePlatformAdmin, async (req, res) => {
     try {
       const since = new Date(Date.now() - 31 * 86400000).toISOString();
-      const events = await rows(supabase.from('commercial_usage_events').select('feature_key,units,cost_micros,created_at').eq('event_type', 'settled').gte('created_at', since).limit(10000));
+      const [events, reconciliations] = await Promise.all([
+        rows(supabase.from('commercial_usage_events').select('user_id,feature_key,units,cost_micros,metadata,created_at').eq('event_type', 'settled').gte('created_at', since).limit(10000)),
+        rows(supabase.from('provider_cost_reconciliations').select('*').gte('period_end', since).order('period_start', { ascending: false }).limit(100)),
+      ]);
+      const reconciliationFor = event => reconciliations.find(item => item.provider === event.metadata?.provider && new Date(event.created_at) >= new Date(item.period_start) && new Date(event.created_at) < new Date(item.period_end));
       const byFeature = Object.values(events.reduce((acc, event) => {
-        acc[event.feature_key] ||= { feature: event.feature_key, units: 0, costMicros: 0 };
+        acc[event.feature_key] ||= { feature: event.feature_key, units: 0, measuredCostMicros: 0, reconciledCostMicros: 0, unreconciledMeasuredCostMicros: 0, measuredCalls: 0, reconciledCalls: 0, unmeasuredCalls: 0 };
         acc[event.feature_key].units += Number(event.units || 0);
-        acc[event.feature_key].costMicros += Number(event.cost_micros || 0);
+        acc[event.feature_key].measuredCostMicros += Number(event.cost_micros || 0);
+        const reconciliation = reconciliationFor(event);
+        if (reconciliation) {
+          acc[event.feature_key].reconciledCostMicros += Math.round(Number(event.cost_micros || 0) * Number(reconciliation.allocation_ratio));
+          acc[event.feature_key].reconciledCalls += 1;
+        } else {
+          acc[event.feature_key].unreconciledMeasuredCostMicros += Number(event.cost_micros || 0);
+        }
+        if (event.metadata?.costSource === 'unmeasured') acc[event.feature_key].unmeasuredCalls += 1;
+        else acc[event.feature_key].measuredCalls += 1;
         return acc;
       }, {}));
-      return res.json({ success: true, since, totalCostMicros: byFeature.reduce((sum, item) => sum + item.costMicros, 0), byFeature });
+      const byUser = Object.values(events.reduce((acc, event) => {
+        acc[event.user_id] ||= { userId: event.user_id, measuredCostMicros: 0, reconciledCostMicros: 0, unreconciledMeasuredCostMicros: 0, calls: 0 };
+        acc[event.user_id].measuredCostMicros += Number(event.cost_micros || 0);
+        const reconciliation = reconciliationFor(event);
+        if (reconciliation) acc[event.user_id].reconciledCostMicros += Math.round(Number(event.cost_micros || 0) * Number(reconciliation.allocation_ratio));
+        else acc[event.user_id].unreconciledMeasuredCostMicros += Number(event.cost_micros || 0);
+        acc[event.user_id].calls += 1;
+        return acc;
+      }, {}));
+      return res.json({
+        success: true,
+        since,
+        measuredCostMicros: byFeature.reduce((sum, item) => sum + item.measuredCostMicros, 0),
+        reconciledCostMicros: byFeature.reduce((sum, item) => sum + item.reconciledCostMicros, 0),
+        unreconciledMeasuredCostMicros: byFeature.reduce((sum, item) => sum + item.unreconciledMeasuredCostMicros, 0),
+        byFeature,
+        byUser,
+        reconciliations,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/internal/costs/reconcile', requirePlatformAdmin, async (req, res) => {
+    try {
+      const provider = ['google-gemini', 'amazon-polly'].includes(req.body?.provider) ? req.body.provider : null;
+      const periodStart = new Date(req.body?.periodStart);
+      const periodEnd = new Date(req.body?.periodEnd);
+      const invoiceTotalMicros = Math.max(0, Math.floor(Number(req.body?.invoiceTotalMicros)));
+      if (!provider || !Number.isFinite(periodStart.getTime()) || !Number.isFinite(periodEnd.getTime()) || periodEnd <= periodStart || !Number.isFinite(invoiceTotalMicros)) {
+        return res.status(400).json({ success: false, message: 'Provider, valid invoice period, and invoiceTotalMicros are required.' });
+      }
+      const events = await rows(supabase.from('commercial_usage_events').select('cost_micros,metadata').eq('event_type', 'settled').eq('metadata->>provider', provider).gte('created_at', periodStart.toISOString()).lt('created_at', periodEnd.toISOString()).limit(50000));
+      const measuredCostMicros = events.reduce((sum, event) => sum + Number(event.cost_micros || 0), 0);
+      if (!measuredCostMicros && invoiceTotalMicros) return res.status(409).json({ success: false, code: 'NO_MEASURED_USAGE', message: 'No measured usage exists for this invoice period.' });
+      const allocationRatio = measuredCostMicros ? invoiceTotalMicros / measuredCostMicros : 0;
+      const saved = await rows(supabase.from('provider_cost_reconciliations').upsert({
+        provider,
+        period_start: periodStart.toISOString(),
+        period_end: periodEnd.toISOString(),
+        currency: 'USD',
+        invoice_total_micros: invoiceTotalMicros,
+        measured_cost_micros: measuredCostMicros,
+        allocation_ratio: allocationRatio,
+        invoice_reference: cleanText(req.body?.invoiceReference, 300) || null,
+        created_by: req.user.id,
+      }, { onConflict: 'provider,period_start,period_end' }).select());
+      return res.status(201).json({ success: true, reconciliation: saved[0] });
     } catch (error) {
       return jsonError(res, error);
     }

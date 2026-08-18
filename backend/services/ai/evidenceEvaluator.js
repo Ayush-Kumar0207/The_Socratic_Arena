@@ -1,7 +1,7 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
-import { StringOutputParser } from '@langchain/core/output_parsers';
 import { summarizeCitationIntegrity } from './evidence.js';
+import { buildGeminiUsage } from '../../lib/providerUsage.js';
 
 const clampScore = (value, fallback) => {
   const number = Number(value);
@@ -48,13 +48,13 @@ const deterministicFallback = (integrity) => {
   };
 };
 
-export const evaluateGrounding = async ({ topic, transcript, model = null }) => {
+export const evaluateGrounding = async ({ topic, transcript, model = null, onUsage = () => {} }) => {
   const integrity = summarizeCitationIntegrity(transcript);
   const fallback = deterministicFallback(integrity);
 
   try {
     const evaluationModel = model || new ChatGoogleGenerativeAI({
-      model: 'gemini-2.5-flash',
+      model: process.env.GEMINI_GENERATION_MODEL || 'gemini-2.5-flash',
       temperature: 0.1,
       apiKey: process.env.GOOGLE_API_KEY,
       maxRetries: 0,
@@ -67,8 +67,14 @@ export const evaluateGrounding = async ({ topic, transcript, model = null }) => 
       ].join(' ')],
       ['human', '{payload}'],
     ]);
-    const chain = prompt.pipe(evaluationModel).pipe(new StringOutputParser());
-    const raw = await chain.invoke({ payload: JSON.stringify(buildEvaluationPayload(topic, transcript)) });
+    const messages = await prompt.invoke({ payload: JSON.stringify(buildEvaluationPayload(topic, transcript)) });
+    const response = await evaluationModel.invoke(messages);
+    onUsage(buildGeminiUsage({
+      usageMetadata: response.usage_metadata || {},
+      model: process.env.GEMINI_GENERATION_MODEL || 'gemini-2.5-flash',
+      requestId: response.response_metadata?.request_id || null,
+    }));
+    const raw = Array.isArray(response.content) ? response.content.map(part => typeof part === 'string' ? part : part?.text || '').join('') : String(response.content || '');
     const semantic = parseJsonObject(raw);
     return {
       groundedness: clampScore(semantic.groundedness, fallback.groundedness),

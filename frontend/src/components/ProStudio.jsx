@@ -1,7 +1,8 @@
-import { createElement, useEffect, useState } from 'react';
+import { createElement, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, Bot, BrainCircuit, BriefcaseBusiness, Building2, Clock3, Download, FileSearch, FolderLock, Loader2, Mic2, Plus, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react';
 import api from '../services/api';
+import { analyzeAudioBlob } from '../lib/acousticAnalysis';
 
 const tabs = [
   ['progress', 'Progress', BarChart3],
@@ -110,8 +111,39 @@ function VaultPanel({ data, reload }) {
 
 function VoicePanel({ data, reload }) {
   const [transcript, setTranscript] = useState(''); const [seconds, setSeconds] = useState(60); const [result, setResult] = useState(null); const [working, setWorking] = useState(false); const [error, setError] = useState('');
-  const submit = async event => { event.preventDefault(); setWorking(true); setError(''); try { const response = await api.post('/commercial/voice-analyses', { transcript, durationSeconds: seconds }, { headers: { 'Idempotency-Key': crypto.randomUUID() } }); setResult(response.data.analysis); await reload(); } catch (e) { setError(e.response?.data?.message || 'Analysis failed.'); } finally { setWorking(false); } };
-  return <div><PanelTitle icon={Mic2} title="Voice Pro" description="Pacing and delivery coaching from transcript plus timing; acoustic traits are never invented." />{!data.entitlements?.voice_pro ? <Locked feature="Voice Pro" plan="Premium" /> : <form onSubmit={submit} className="mt-6 space-y-3"><textarea value={transcript} onChange={e => setTranscript(e.target.value)} required placeholder="Paste the speech transcript…" className="min-h-40 w-full rounded-xl border border-slate-700 bg-slate-950 p-4 outline-none" /><label className="flex items-center gap-3 text-sm text-slate-400"><Clock3 className="h-4 w-4" /> Duration in seconds <input type="number" min="1" max="3600" value={seconds} onChange={e => setSeconds(e.target.value)} className="w-28 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" /></label><button disabled={working} className="rounded-xl bg-violet-500 px-5 py-3 font-black">{working ? 'Analyzing…' : 'Analyze delivery'}</button>{error && <ErrorText text={error} />}{result && <Result value={result.analysis || result} />}</form>}</div>;
+  const [recording, setRecording] = useState(false); const [recordingSeconds, setRecordingSeconds] = useState(0); const [audioBlob, setAudioBlob] = useState(null); const [audioUrl, setAudioUrl] = useState('');
+  const recorderRef = useRef(null); const streamRef = useRef(null); const chunksRef = useRef([]); const timerRef = useRef(null);
+  const releaseRecorder = () => { clearInterval(timerRef.current); timerRef.current = null; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; };
+  useEffect(() => () => releaseRecorder(), []);
+  useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+  const startRecording = async () => {
+    setError('');
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return setError('Audio recording is not supported in this browser. Transcript-only analysis remains available.');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }, video: false });
+      streamRef.current = stream; chunksRef.current = []; setRecordingSeconds(0); setAudioBlob(null);
+      if (audioUrl) URL.revokeObjectURL(audioUrl); setAudioUrl('');
+      const recorder = new MediaRecorder(stream); recorderRef.current = recorder;
+      recorder.ondataavailable = event => { if (event.data?.size) chunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        setAudioBlob(blob); setAudioUrl(URL.createObjectURL(blob)); setRecording(false); releaseRecorder();
+      };
+      recorder.start(250); setRecording(true);
+      timerRef.current = setInterval(() => setRecordingSeconds(value => value + 1), 1000);
+    } catch (cause) { releaseRecorder(); setError(cause?.name === 'NotAllowedError' ? 'Microphone permission was denied.' : 'The microphone could not be started.'); }
+  };
+  const stopRecording = () => { if (recorderRef.current?.state === 'recording') recorderRef.current.stop(); };
+  const submit = async event => {
+    event.preventDefault(); setWorking(true); setError('');
+    try {
+      const acousticMetrics = audioBlob ? await analyzeAudioBlob(audioBlob, transcript) : null;
+      const durationSeconds = acousticMetrics?.durationSeconds || Number(seconds);
+      const response = await api.post('/commercial/voice-analyses', { transcript, durationSeconds, acousticMetrics }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
+      setResult(response.data.analysis); await reload();
+    } catch (e) { setError(e.response?.data?.message || e.message || 'Analysis failed.'); } finally { setWorking(false); }
+  };
+  return <div><PanelTitle icon={Mic2} title="Voice Pro" description="Private acoustic and semantic coaching. The browser measures your recording locally; raw audio is never uploaded." />{!data.entitlements?.voice_pro ? <Locked feature="Voice Pro" plan="Premium" /> : <form onSubmit={submit} className="mt-6 space-y-4"><div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4"><div className="flex flex-wrap items-center gap-3"><button type="button" onClick={recording ? stopRecording : startRecording} className={`rounded-xl px-4 py-2 text-sm font-black ${recording ? 'bg-rose-500 text-white' : 'bg-violet-500 text-white'}`}>{recording ? `Stop recording · ${recordingSeconds}s` : audioBlob ? 'Record again' : 'Record speech'}</button>{audioUrl && <audio src={audioUrl} controls className="h-10 max-w-full" />}<span className="text-xs text-slate-400">Pauses, pitch variation, pace, volume dynamics and cutoff indicators are calculated on-device.</span></div></div><textarea value={transcript} onChange={e => setTranscript(e.target.value)} required placeholder="Paste or correct the speech transcript so semantic coaching matches the recording…" className="min-h-40 w-full rounded-xl border border-slate-700 bg-slate-950 p-4 outline-none" />{!audioBlob && <label className="flex items-center gap-3 text-sm text-slate-400"><Clock3 className="h-4 w-4" /> Transcript-only duration in seconds <input type="number" min="1" max="3600" value={seconds} onChange={e => setSeconds(e.target.value)} className="w-28 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" /></label>}<button disabled={working || recording} className="rounded-xl bg-violet-500 px-5 py-3 font-black disabled:opacity-60">{working ? 'Measuring and coaching…' : audioBlob ? 'Analyze acoustic delivery' : 'Analyze transcript delivery'}</button>{error && <ErrorText text={error} />}{result && <Result value={result.analysis || result} />}</form>}</div>;
 }
 
 function CareerPanel({ data }) {

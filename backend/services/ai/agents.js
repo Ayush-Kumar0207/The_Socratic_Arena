@@ -30,7 +30,7 @@ import { Document } from 'langchain/document';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 
 // Output parser converts model messages into plain string output.
-import { StringOutputParser } from '@langchain/core/output_parsers';
+import { buildGeminiUsage } from '../../lib/providerUsage.js';
 import {
   createStructuredActorOutput,
   formatEvidenceForPrompt,
@@ -194,7 +194,7 @@ export const createKnowledgeBase = async (chunks, options = {}) => {
  * @param {string} systemPrompt - Persona instructions.
  * @returns {{ invoke: (input: {topic: string, evidence: string, priorContext?: string}) => Promise<string> }}
  */
-const createPersonaChain = (model, systemPrompt) => {
+const createPersonaChain = (model, systemPrompt, onUsage = () => {}) => {
   const prompt = ChatPromptTemplate.fromMessages([
     ['system', systemPrompt],
     [
@@ -219,12 +219,18 @@ const createPersonaChain = (model, systemPrompt) => {
     ],
   ]);
 
-  // Compose: prompt -> model -> plain string.
-  const chain = prompt.pipe(model).pipe(new StringOutputParser());
-
   return {
     invoke: async ({ topic, evidence, priorContext = 'No previous turns yet.' }) => {
-      return chain.invoke({ topic, evidence, priorContext });
+      const messages = await prompt.invoke({ topic, evidence, priorContext });
+      const response = await model.invoke(messages);
+      onUsage(buildGeminiUsage({
+        usageMetadata: response.usage_metadata || {},
+        model: process.env.GEMINI_GENERATION_MODEL || 'gemini-2.5-flash',
+        requestId: response.response_metadata?.request_id || null,
+      }));
+      return Array.isArray(response.content)
+        ? response.content.map(part => typeof part === 'string' ? part : part?.text || '').join('')
+        : String(response.content || '');
     },
   };
 };
@@ -250,7 +256,7 @@ const createPersonaChain = (model, systemPrompt) => {
  * }>}
  * @throws {Error} If chat model or persona setup fails.
  */
-export const createAgents = async (retriever) => {
+export const createAgents = async (retriever, { onUsage = () => {} } = {}) => {
   try {
     // Validate retriever interface shape to prevent runtime surprises.
     if (!retriever || typeof retriever.invoke !== 'function') {
@@ -259,7 +265,7 @@ export const createAgents = async (retriever) => {
 
     // Shared Gemini chat model configuration for both personas.
     const chatModel = new ChatGoogleGenerativeAI({
-      model: 'gemini-2.5-flash',
+      model: process.env.GEMINI_GENERATION_MODEL || 'gemini-2.5-flash',
       temperature: 0.5,
       apiKey: process.env.GOOGLE_API_KEY,
       maxRetries: 0,
@@ -283,8 +289,8 @@ export const createAgents = async (retriever) => {
     ].join(' ');
 
     // Build runnable persona chains.
-    const defenderChain = createPersonaChain(chatModel, defenderSystemPrompt);
-    const criticChain = createPersonaChain(chatModel, criticSystemPrompt);
+    const defenderChain = createPersonaChain(chatModel, defenderSystemPrompt, onUsage);
+    const criticChain = createPersonaChain(chatModel, criticSystemPrompt, onUsage);
 
     // Create standard response wrapper to avoid duplicated retrieval logic.
     const buildResponder = (personaChain) => ({

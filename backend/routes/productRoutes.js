@@ -593,7 +593,7 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
           feature: 'ai_practice_turn',
           entitlement: 'ai_sparring',
           requestKey: req.get('idempotency-key') || `practice-turn:${crypto.randomUUID()}`,
-          action: () => generateWithRetry(prompt, 2, false),
+          action: () => generateWithRetry(prompt, 2, false, { includeUsage: true }),
         });
         response = cleanText(metered.result, 1200);
         aiMode = 'gemini';
@@ -642,7 +642,7 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
           feature: 'ai_practice_score',
           entitlement: 'ai_sparring',
           requestKey: req.get('idempotency-key') || `practice-score:${crypto.randomUUID()}`,
-          action: () => generateWithRetry(prompt, 2, true),
+          action: () => generateWithRetry(prompt, 2, true, { includeUsage: true }),
         });
         result = metered.result;
         aiMode = 'gemini';
