@@ -71,7 +71,7 @@
         right: 18px;
         bottom: 18px;
         z-index: 2147483000;
-        display: flex;
+        display: none;
         align-items: center;
         gap: 10px;
         max-width: min(420px, calc(100vw - 36px));
@@ -102,6 +102,7 @@
     </div>
 
     <a
+      id="ph-launch-callout"
       class="ph-launch-callout"
       href="https://www.producthunt.com/products/the-socratic-arena/the-socratic-arena"
       target="_blank"
@@ -111,6 +112,32 @@
       <span aria-hidden="true">🚀</span>
       <span><strong>Live on Product Hunt today</strong><br /><span>See the launch & share feedback →</span></span>
     </a>
+
+    <script>
+      (function() {
+        var visiblePaths = new Set(["/", "/dashboard"]);
+        var syncProductHuntCallout = function() {
+          var callout = document.getElementById("ph-launch-callout");
+          if (!callout) return;
+          callout.style.display = visiblePaths.has(window.location.pathname) ? "flex" : "none";
+        };
+
+        var originalPushState = history.pushState;
+        var originalReplaceState = history.replaceState;
+        history.pushState = function() {
+          var result = originalPushState.apply(this, arguments);
+          queueMicrotask(syncProductHuntCallout);
+          return result;
+        };
+        history.replaceState = function() {
+          var result = originalReplaceState.apply(this, arguments);
+          queueMicrotask(syncProductHuntCallout);
+          return result;
+        };
+        window.addEventListener("popstate", syncProductHuntCallout);
+        syncProductHuntCallout();
+      })();
+    </script>
 
     <!-- Network Safety Net: if JS completely fails after 20s, show a diagnostic -->
     <script>
