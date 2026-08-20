@@ -46,26 +46,118 @@
 
     <title>The Socratic Arena | Train Your Thinking</title>
 
-    <!-- Favicon: tiny 32x32 PNG (0.5 KB) — loads instantly even on throttled LANs -->
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico" />
-
-    <!-- PWA / Mobile Shell -->
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Socratic Arena" />
 
-    <!-- DNS Prefetch: resolve Supabase domain BEFORE JS even loads -->
     <link rel="dns-prefetch" href="https://zjnpkxmtxayyvfpndfah.supabase.co" />
     <link rel="preconnect" href="https://zjnpkxmtxayyvfpndfah.supabase.co" crossorigin />
 
-    <!-- Instant Dark Background: prevents white flash on any network -->
     <style>
       html, body { margin: 0; padding: 0; background: #020617; }
       #root { min-height: 100vh; background: #020617; }
       .app-skeleton { display:flex; min-height:100vh; align-items:center; justify-content:center; background:#020617; }
       .app-skeleton-pulse { width:40px; height:40px; border-radius:50%; border:3px solid transparent; border-top-color:#06b6d4; animation:sk-spin .8s linear infinite; }
       @keyframes sk-spin { to { transform:rotate(360deg); } }
+
+      .entry-hero[hidden] { display: none !important; }
+      .entry-hero {
+        position: relative;
+        overflow: hidden;
+        border-bottom: 1px solid rgba(34,211,238,.18);
+        background:
+          radial-gradient(circle at 18% 25%, rgba(6,182,212,.15), transparent 34%),
+          radial-gradient(circle at 82% 10%, rgba(99,102,241,.12), transparent 36%),
+          #020617;
+        color: #e2e8f0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .entry-hero-inner {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 48px 0 42px;
+        text-align: center;
+      }
+      .entry-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding: 6px 10px;
+        border: 1px solid rgba(34,211,238,.28);
+        border-radius: 999px;
+        background: rgba(8,47,73,.28);
+        color: #67e8f9;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .14em;
+        text-transform: uppercase;
+      }
+      .entry-hero h1 {
+        margin: 0 auto 12px;
+        max-width: 820px;
+        color: #f8fafc;
+        font-size: clamp(32px, 5vw, 58px);
+        line-height: 1.02;
+        letter-spacing: -.035em;
+      }
+      .entry-hero p {
+        margin: 0 auto;
+        max-width: 780px;
+        color: #94a3b8;
+        font-size: clamp(15px, 2vw, 19px);
+        line-height: 1.65;
+      }
+      .entry-features {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin: 22px auto 24px;
+      }
+      .entry-feature {
+        padding: 7px 10px;
+        border: 1px solid rgba(148,163,184,.18);
+        border-radius: 999px;
+        background: rgba(15,23,42,.72);
+        color: #cbd5e1;
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .entry-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+      .entry-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: 11px;
+        font-size: 14px;
+        font-weight: 800;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .entry-action-primary {
+        border: 1px solid #22d3ee;
+        background: #22d3ee;
+        color: #082f49;
+      }
+      .entry-action-primary:hover { background: #67e8f9; }
+      .entry-action-secondary {
+        border: 1px solid rgba(249,115,22,.48);
+        background: rgba(124,45,18,.22);
+        color: #fdba74;
+      }
+      .entry-action-secondary:hover { border-color: #fb923c; color: #fed7aa; }
+      .entry-note { margin-top: 12px !important; color: #64748b !important; font-size: 12px !important; }
+
       .ph-launch-callout {
         position: fixed;
         right: 18px;
@@ -88,13 +180,45 @@
       .ph-launch-callout:hover { border-color: rgba(249,115,22,.9); transform: translateY(-1px); }
       .ph-launch-callout strong { color: #fb923c; }
       .ph-launch-callout span:last-child { color: #94a3b8; font-weight: 500; }
+
       @media (max-width: 640px) {
+        .entry-hero-inner { width: min(100% - 28px, 1120px); padding: 34px 0 32px; }
+        .entry-actions { flex-direction: column; align-items: stretch; max-width: 360px; margin: 0 auto; }
         .ph-launch-callout { right: 12px; bottom: 12px; max-width: calc(100vw - 24px); padding: 10px 12px; }
       }
     </style>
   </head>
   <body>
-    <!-- Instant skeleton: shows a branded loading spinner within 0ms, even before JS downloads -->
+    <section id="entry-hero" class="entry-hero" hidden aria-label="The Socratic Arena overview">
+      <div class="entry-hero-inner">
+        <div class="entry-kicker">⚔ Public Beta</div>
+        <h1>Train your thinking. Prove your reasoning.</h1>
+        <p>
+          Compete in live structured debates, get AI-assisted multi-judge feedback, practice against AI,
+          and challenge your own documents in Evidence Arena with grounded citations.
+        </p>
+        <div class="entry-features" aria-label="Key features">
+          <span class="entry-feature">Live 1v1 debates</span>
+          <span class="entry-feature">AI-assisted judging</span>
+          <span class="entry-feature">Targeted coaching</span>
+          <span class="entry-feature">Evidence Arena</span>
+          <span class="entry-feature">Reasoning profile</span>
+        </div>
+        <div class="entry-actions">
+          <button id="entry-start" class="entry-action entry-action-primary" type="button">Start free →</button>
+          <a
+            class="entry-action entry-action-secondary"
+            href="https://www.producthunt.com/products/the-socratic-arena/the-socratic-arena/launch-day?utm_source=socratic-arena&utm_medium=website&utm_campaign=launch-day"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View Product Hunt launch
+          </a>
+        </div>
+        <p class="entry-note">Free public beta · No payment required to start</p>
+      </div>
+    </section>
+
     <div id="root">
       <div class="app-skeleton">
         <div class="app-skeleton-pulse"></div>
@@ -104,7 +228,7 @@
     <a
       id="ph-launch-callout"
       class="ph-launch-callout"
-      href="https://www.producthunt.com/products/the-socratic-arena/the-socratic-arena"
+      href="https://www.producthunt.com/products/the-socratic-arena/the-socratic-arena/launch-day?utm_source=socratic-arena&utm_medium=website&utm_campaign=launch-day"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="See The Socratic Arena launch on Product Hunt and share feedback"
@@ -115,11 +239,14 @@
 
     <script>
       (function() {
+        var launchEndsAt = Date.parse("2026-08-20T07:00:00Z");
         var visiblePaths = new Set(["/", "/dashboard"]);
+        var launchIsActive = function() { return Date.now() < launchEndsAt; };
+
         var syncProductHuntCallout = function() {
           var callout = document.getElementById("ph-launch-callout");
           if (!callout) return;
-          callout.style.display = visiblePaths.has(window.location.pathname) ? "flex" : "none";
+          callout.style.display = launchIsActive() && visiblePaths.has(window.location.pathname) ? "flex" : "none";
         };
 
         var originalPushState = history.pushState;
@@ -136,6 +263,36 @@
         };
         window.addEventListener("popstate", syncProductHuntCallout);
         syncProductHuntCallout();
+        setTimeout(syncProductHuntCallout, Math.max(0, launchEndsAt - Date.now()) + 50);
+
+        var root = document.getElementById("root");
+        var hero = document.getElementById("entry-hero");
+        var startButton = document.getElementById("entry-start");
+        var introDismissed = function() {
+          try { return sessionStorage.getItem("socratic-entry-intro-dismissed") === "1"; }
+          catch (_) { return false; }
+        };
+        var dismissIntro = function() {
+          try { sessionStorage.setItem("socratic-entry-intro-dismissed", "1"); } catch (_) {}
+          hero.hidden = true;
+          root.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+        var syncEntryHero = function() {
+          if (introDismissed() || window.location.pathname !== "/") {
+            hero.hidden = true;
+            return;
+          }
+          var text = root.innerText || "";
+          var authVisible = text.includes("Welcome Back") || text.includes("Create Account");
+          hero.hidden = !authVisible;
+        };
+
+        if (startButton) startButton.addEventListener("click", dismissIntro);
+        if (root && window.MutationObserver) {
+          new MutationObserver(syncEntryHero).observe(root, { childList: true, subtree: true, characterData: true });
+        }
+        setTimeout(syncEntryHero, 0);
+        setTimeout(syncEntryHero, 600);
       })();
     </script>
 
