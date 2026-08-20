@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>The Socratic Arena — Interactive Product Tour</title>
+<meta name="description" content="Interactive Product Hunt tour of The Socratic Arena: live debate, AI-assisted judging, Evidence Arena, targeted coaching, and reasoning profiles."/>
+<style>
+:root{--bg:#030a19;--panel:#08152b;--panel2:#0b1d36;--line:#173656;--cyan:#2dd4ee;--blue:#4f8cff;--green:#45dca1;--orange:#fb923c;--text:#f4f8ff;--muted:#9eb0cc}
+*{box-sizing:border-box}
+html,body{margin:0;background:radial-gradient(circle at 15% 0%,#08273d 0,transparent 31%),radial-gradient(circle at 90% 95%,#091d49 0,transparent 32%),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;min-height:100%}
+body{min-height:100vh;display:flex;flex-direction:column;overflow-anchor:none}
+.top{height:70px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid #10233c;background:rgba(3,10,25,.86);backdrop-filter:blur(14px);position:sticky;top:0;z-index:10}
+.brand{display:flex;align-items:center;gap:12px}.mark{width:38px;height:38px;border:1px solid var(--cyan);border-radius:10px;display:grid;place-items:center;font-weight:900;color:var(--cyan);box-shadow:0 0 30px #2dd4ee22}.brand b{letter-spacing:.04em}.beta{font-size:10px;color:var(--cyan);font-weight:800;letter-spacing:.12em}
+.top a{color:var(--muted);text-decoration:none;font-weight:700;font-size:13px}.top a:hover{color:var(--cyan)}
+.wrap{width:min(1180px,calc(100% - 34px));margin:34px auto 44px;display:grid;grid-template-columns:260px 1fr;gap:24px}
+.side{border:1px solid var(--line);border-radius:20px;background:rgba(8,21,43,.78);padding:18px;align-self:start;position:sticky;top:94px}
+.side h3{margin:2px 0 14px;font-size:12px;letter-spacing:.14em;color:var(--cyan);text-transform:uppercase}
+.stepBtn{width:100%;text-align:left;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--muted);padding:11px 12px;margin:3px 0;cursor:pointer;font-weight:700}
+.stepBtn:hover{background:#0b203b;color:white}.stepBtn.active{background:#0c2945;border-color:#1e5875;color:white}.stepBtn.active span{color:var(--cyan)}
+.progress{height:6px;background:#0d2239;border-radius:9px;overflow:hidden;margin:18px 0 6px}.progress i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue));width:14.3%;transition:.35s}
+.small{font-size:12px;color:#6f86a6}
+.stage{border:1px solid var(--line);border-radius:24px;overflow:hidden;overflow-anchor:none;background:linear-gradient(180deg,rgba(11,29,54,.92),rgba(5,15,31,.96));min-height:640px;box-shadow:0 26px 90px rgba(0,0,0,.34)}
+.hero{padding:36px 42px 24px;border-bottom:1px solid #112a47}.eyebrow{font-size:12px;font-weight:900;color:var(--cyan);letter-spacing:.14em;text-transform:uppercase}.hero h1{font-size:clamp(34px,4vw,58px);line-height:1.02;letter-spacing:-.035em;margin:10px 0 13px;max-width:790px}.hero p{font-size:18px;color:var(--muted);line-height:1.6;max-width:780px;margin:0}
+.scene{padding:34px 42px 20px;display:none;animation:in .32s ease}.scene.active{display:block}@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.scene h2{font-size:29px;margin:0 0 8px}.scene>p{color:var(--muted);font-size:16px;line-height:1.6;margin:0 0 24px}
+.mock{border:1px solid #1b4164;border-radius:20px;background:#06152a;overflow:hidden}.mockTop{padding:12px 15px;border-bottom:1px solid #153651;display:flex;gap:7px;align-items:center;color:#7187a5;font-size:11px}.dot{width:8px;height:8px;border-radius:50%;background:#294764}.mockBody{padding:24px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:15px}.card{padding:17px;border:1px solid #163b5d;border-radius:15px;background:#091d35}.card h4{margin:0 0 7px;font-size:15px}.card p{margin:0;color:#8ea5c3;font-size:13px;line-height:1.5}
+.badge{display:inline-block;border:1px solid #25617a;background:#092a40;color:#6cecff;border-radius:99px;padding:5px 9px;font-size:11px;font-weight:800}
+.msg{max-width:78%;border-radius:14px;padding:14px 16px;margin:9px 0;font-size:14px;line-height:1.55}.left{background:#0d2947;border:1px solid #1c4b70}.right{margin-left:auto;background:#123426;border:1px solid #23694c}
+.score{display:grid;grid-template-columns:140px 1fr 44px;align-items:center;gap:12px;margin:13px 0;font-size:13px}.bar{height:10px;background:#173048;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--blue))}
+.cite{border-left:3px solid var(--cyan);background:#08223a;padding:11px 13px;border-radius:0 10px 10px 0;color:#b9c9de;font-size:13px;margin:10px 0}
+.ctaRow{padding:20px 42px 34px;display:flex;justify-content:space-between;align-items:center;gap:12px}.btn{border:none;border-radius:12px;padding:12px 17px;font-weight:900;cursor:pointer}.primary{background:var(--cyan);color:#06233a}.secondary{background:#0c2440;border:1px solid #245276;color:#d8e6f7}.btn:hover{filter:brightness(1.08)}
+.final{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.quote{font-size:26px;line-height:1.35;font-weight:800}.featurePills{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.featurePills span{padding:7px 10px;border-radius:99px;border:1px solid #234d6a;color:#bcd0e7;font-size:12px}
+@media(max-width:800px){.wrap{grid-template-columns:1fr}.side{position:static}.top{padding:0 16px}.hero,.scene,.ctaRow{padding-left:22px;padding-right:22px}.grid2,.final{grid-template-columns:1fr}.side{display:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="mark">S</div><div><b>THE SOCRATIC ARENA</b><div class="beta">INTERACTIVE PRODUCT TOUR</div></div></div>
+  <a href="https://socratic-arena.vercel.app/" target="_blank" rel="noopener">Open the live beta ↗</a>
+</header>
+
+<main class="wrap">
+<aside class="side">
+  <h3>Guided tour</h3>
+  <button class="stepBtn active" data-step="0"><span>01</span> Why it exists</button>
+  <button class="stepBtn" data-step="1"><span>02</span> Live debate</button>
+  <button class="stepBtn" data-step="2"><span>03</span> AI judging</button>
+  <button class="stepBtn" data-step="3"><span>04</span> Evidence Arena</button>
+  <button class="stepBtn" data-step="4"><span>05</span> Coaching</button>
+  <button class="stepBtn" data-step="5"><span>06</span> Reasoning profile</button>
+  <button class="stepBtn" data-step="6"><span>07</span> Start free</button>
+  <div class="progress"><i id="prog"></i></div>
+  <div class="small"><span id="count">1</span> of 7 · ~60 seconds</div>
+</aside>
+
+<section class="stage">
+  <div class="hero">
+    <div class="eyebrow">Free public beta · Open source</div>
+    <h1>Train your reasoning. Prove how you think.</h1>
+    <p>A clickable tour of the core Socratic Arena loop: structured debate, AI-assisted evaluation, document-grounded evidence, and targeted improvement.</p>
+  </div>
+
+  <div class="scene active">
+    <h2>Reasoning should be trainable.</h2>
+    <p>Most online debate rewards speed, certainty, or popularity. Socratic Arena is designed around something harder: inspectable reasoning quality.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Arena principles</div><div class="mockBody grid2">
+      <div class="card"><span class="badge">COMPETE</span><h4>Structured 1v1 debates</h4><p>Take a position, respond to arguments, and build a performance record.</p></div>
+      <div class="card"><span class="badge">IMPROVE</span><h4>Feedback becomes practice</h4><p>Scores are translated into concrete next-step coaching instead of vanity metrics.</p></div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Step into a live structured debate.</h2>
+    <p>Debate another person—or practice against AI—inside a turn-based room designed to keep arguments readable and comparable.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Live debate · Topic: Should AI tutors replace traditional homework?</div><div class="mockBody">
+      <div class="msg left"><b>Affirmative</b><br>AI tutors can adapt explanations and practice intensity to each learner, which static homework cannot.</div>
+      <div class="msg right"><b>Negative</b><br>Personalization is useful, but removing teacher-designed work could weaken curriculum coherence and independent struggle.</div>
+      <div class="msg left"><b>Rebuttal</b><br>The strongest model is augmentation: adaptive practice inside teacher-defined learning goals.</div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Get judged across multiple dimensions.</h2>
+    <p>The Arena uses AI-assisted, identity-blinded evaluation as an advisory signal—not an unquestionable verdict.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Multi-judge evaluation</div><div class="mockBody">
+      <div class="score"><b>Logic</b><div class="bar"><i style="width:84%"></i></div><b>84</b></div>
+      <div class="score"><b>Evidence</b><div class="bar"><i style="width:76%"></i></div><b>76</b></div>
+      <div class="score"><b>Communication</b><div class="bar"><i style="width:89%"></i></div><b>89</b></div>
+      <div class="score"><b>Counterargument</b><div class="bar"><i style="width:67%"></i></div><b>67</b></div>
+      <div class="card" style="margin-top:18px"><h4>Judge agreement: High</h4><p>Evaluation is versioned and inspectable; uncertainty and appeals are treated as part of the system.</p></div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Debate your own documents in Evidence Arena.</h2>
+    <p>Upload a PDF and argue with document-scoped evidence instead of asking the system to invent support.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Evidence Arena · climate_policy.pdf</div><div class="mockBody grid2">
+      <div class="card"><span class="badge">SOURCE</span><h4>Retrieved evidence</h4>
+        <div class="cite">“The policy reduced peak electricity demand by 8.4% during the pilot period…” <b>[p. 17]</b></div>
+        <div class="cite">“Household adoption rose fastest where real-time feedback was enabled…” <b>[p. 24]</b></div>
+      </div>
+      <div class="card"><span class="badge">ARGUMENT</span><h4>Traceable support</h4><p>Your argument stays linked to the exact document evidence used to support it.</p><p style="margin-top:14px;color:#6cecff">Grounded citations · inspectable context · no Elo impact</p></div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Turn weaknesses into the next drill.</h2>
+    <p>The score is not the destination. Socratic Arena uses your performance to identify what to practice next.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Targeted coaching</div><div class="mockBody">
+      <div class="card"><span class="badge">NEXT FOCUS</span><h4 style="font-size:22px">Strengthen counterarguments</h4><p>Your claims are clear, but recent debates show that rebuttals often answer the conclusion without directly engaging the opponent’s strongest premise.</p></div>
+      <div class="grid2" style="margin-top:14px"><div class="card"><h4>Micro-drill</h4><p>Identify the opponent’s strongest premise before writing a rebuttal.</p></div><div class="card"><h4>Practice mode</h4><p>Run a focused AI sparring session without affecting ranked performance.</p></div></div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Build a longitudinal reasoning profile.</h2>
+    <p>Track how your thinking develops across multiple reasoning skills rather than reducing performance to a single number.</p>
+    <div class="mock"><div class="mockTop"><i class="dot"></i><i class="dot"></i><i class="dot"></i> Reasoning profile</div><div class="mockBody">
+      <div class="score"><b>Logic</b><div class="bar"><i style="width:82%"></i></div><b>82</b></div>
+      <div class="score"><b>Evidence</b><div class="bar"><i style="width:74%"></i></div><b>74</b></div>
+      <div class="score"><b>Clarity</b><div class="bar"><i style="width:86%"></i></div><b>86</b></div>
+      <div class="score"><b>Rebuttal</b><div class="bar"><i style="width:69%"></i></div><b>69</b></div>
+      <div class="featurePills"><span>11 reasoning skills</span><span>Targeted coaching</span><span>Performance history</span><span>Competitive identity</span></div>
+    </div></div>
+  </div>
+
+  <div class="scene">
+    <h2>Now try the real Arena.</h2>
+    <p>This guided demo intentionally uses a simplified representation of the shipped product flow. The live public beta is where the real debate experience happens.</p>
+    <div class="mock"><div class="mockBody final">
+      <div><div class="quote">“Train your reasoning.<br>Prove how you think.”</div><div class="featurePills"><span>Live debates</span><span>AI-assisted judging</span><span>Evidence Arena</span><span>Reasoning profile</span><span>Open source</span></div></div>
+      <div class="card"><h4>Free public beta</h4><p>No payment required to start. Human debates remain open; AI features use fair usage allowances.</p><a href="https://socratic-arena.vercel.app/" target="_blank" rel="noopener"><button class="btn primary" style="width:100%;margin-top:18px">Open Socratic Arena ↗</button></a></div>
+    </div></div>
+  </div>
+
+  <div class="ctaRow">
+    <button id="prev" class="btn secondary" disabled>← Previous</button>
+    <span class="small">Use ← → arrow keys too</span>
+    <button id="next" class="btn primary">Next →</button>
+  </div>
+</section>
+</main>
+
+<script>
+const scenes=[...document.querySelectorAll('.scene')], steps=[...document.querySelectorAll('.stepBtn')];
+let i=0;
+function show(n){
+  i=Math.max(0,Math.min(scenes.length-1,n));
+  scenes.forEach((s,k)=>s.classList.toggle('active',k===i));
+  steps.forEach((s,k)=>s.classList.toggle('active',k===i));
+  document.getElementById('count').textContent=i+1;
+  document.getElementById('prog').style.width=((i+1)/scenes.length*100)+'%';
+  document.getElementById('prev').disabled=i===0;
+  document.getElementById('next').textContent=i===scenes.length-1?'Restart ↺':'Next →';
+}
+document.getElementById('prev').onclick=()=>show(i-1);
+document.getElementById('next').onclick=()=>show(i===scenes.length-1?0:i+1);
+steps.forEach((b,k)=>b.onclick=()=>show(k));
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'){e.preventDefault();show(i===scenes.length-1?0:i+1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();show(i-1);}
+});
+const requestedStep = Number(new URLSearchParams(location.search).get('step') || 0);
+show(Number.isFinite(requestedStep) ? requestedStep : 0);
+</script>
+</body>
+</html>
