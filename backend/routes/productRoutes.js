@@ -23,6 +23,8 @@ import { launchAiLimits, launchAllowanceMessages } from '../lib/launchLimits.js'
 import { recordAiAllowance } from '../lib/observability.js';
 import { JUDGE_PANEL, runBlindJudgePanel } from '../lib/judgePanel.js';
 import { buildVerifiedTournamentResult } from '../lib/tournamentIntegrity.js';
+import { commercialModeEnabled } from '../lib/commercialConfig.js';
+import { createCommercialService } from '../lib/commercialService.js';
 
 const SCENARIO_FALLBACKS = [
   { scenario_key: 'sales-objection', title: 'Enterprise sales objection', description: 'Defend value and handle a skeptical procurement lead.', category: 'Sales', difficulty: 'Intermediate', opening_prompt: 'Your proposal is twice the price of the incumbent. Why should we take that risk?' },
@@ -70,14 +72,16 @@ const csvCell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
 export default function createProductRoutes({ supabase, generateWithRetry, advancedAi = true }) {
   const router = express.Router();
+  const commercial = createCommercialService({ supabase });
   const aiConfigured = advancedAi && Boolean(process.env.GEMINI_API_KEY);
-  const skipAiAllowance = () => !aiConfigured;
+  const skipUserAiAllowance = () => !aiConfigured || commercialModeEnabled();
+  const skipGlobalAiAllowance = () => !aiConfigured;
   const userAllowance = ({ name, max, message }) => createDailyAllowance({
     name,
     max,
     message,
     code: 'DAILY_AI_ALLOWANCE_REACHED',
-    skip: skipAiAllowance,
+    skip: skipUserAiAllowance,
     onDecision: recordAiAllowance,
   });
   const globalAllowance = ({ name, max, message }) => createDailyAllowance({
@@ -87,7 +91,7 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     code: 'AI_CAPACITY_REACHED',
     scope: 'global',
     key: () => 'all-users',
-    skip: skipAiAllowance,
+    skip: skipGlobalAiAllowance,
     onDecision: recordAiAllowance,
   });
 
@@ -584,9 +588,19 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     if (advancedAi && process.env.GEMINI_API_KEY) {
       try {
         const prompt = `You are a rigorous but constructive sparring partner. The learner argues ${stance} "${topic}"${scenario_key ? ` in ${scenario_key}` : ''}. Give a direct 70-120 word counterargument, identify one unsupported assumption, and end with one probing question. No markdown.\n${history.slice(-6).map(turn => `${turn.role}: ${turn.text}`).join('\n')}\nLearner: ${message}`;
-        response = cleanText(await generateWithRetry(prompt, 2, false), 1200);
+        const metered = await commercial.runMetered({
+          userId: req.user.id,
+          feature: 'ai_practice_turn',
+          entitlement: 'ai_sparring',
+          requestKey: req.get('idempotency-key') || `practice-turn:${crypto.randomUUID()}`,
+          action: () => generateWithRetry(prompt, 2, false, { includeUsage: true }),
+        });
+        response = cleanText(metered.result, 1200);
         aiMode = 'gemini';
-      } catch (error) { console.warn('[Practice] AI fallback:', error.message); }
+      } catch (error) {
+        if (error.statusCode === 402 || error.statusCode === 429) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+        console.warn('[Practice] AI fallback:', error.message);
+      }
     }
     if (!response) response = buildLocalOpponent({ topic, stance, message, round });
     const wordCount = cleanText(message, 10000).split(/\s+/).length;
@@ -623,9 +637,19 @@ export default function createProductRoutes({ supabase, generateWithRetry, advan
     if (advancedAi && process.env.GEMINI_API_KEY) {
       try {
         const prompt = `Score this practice 0-100. Return only JSON with metrics containing exactly ${REASONING_METRICS.join(', ')}, overall, feedback, strengths (2), improvements (2). Reward direct response, truthful calibration, reliable evidence, and emotional control.\nTopic: ${topic}\n${transcript.slice(-12).map(turn => `${turn.role}: ${turn.text}`).join('\n')}`;
-        result = await generateWithRetry(prompt, 2, true);
+        const metered = await commercial.runMetered({
+          userId: req.user.id,
+          feature: 'ai_practice_score',
+          entitlement: 'ai_sparring',
+          requestKey: req.get('idempotency-key') || `practice-score:${crypto.randomUUID()}`,
+          action: () => generateWithRetry(prompt, 2, true, { includeUsage: true }),
+        });
+        result = metered.result;
         aiMode = 'gemini';
-      } catch (error) { console.warn('[Practice] Scoring fallback:', error.message); }
+      } catch (error) {
+        if (error.statusCode === 402 || error.statusCode === 429) return res.status(error.statusCode).json({ success: false, code: error.code, message: error.message });
+        console.warn('[Practice] Scoring fallback:', error.message);
+      }
     }
     if (!result?.metrics) result = deterministicPracticeScore(transcript);
     result.metrics = Object.fromEntries(REASONING_METRICS.map(metric => [metric, Math.max(0, Math.min(100, Math.round(Number(result.metrics?.[metric]) || 0)))]));

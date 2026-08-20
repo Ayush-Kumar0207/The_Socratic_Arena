@@ -70,6 +70,8 @@ export const persistSupabaseKnowledgeBase = async ({
   userId,
   filename,
   topic,
+  vaultCollectionId = null,
+  retainedUntil = null,
   documents,
   embeddings,
   batchSize,
@@ -83,6 +85,8 @@ export const persistSupabaseKnowledgeBase = async ({
       filename,
       topic,
       chunk_count: documents.length,
+      vault_collection_id: vaultCollectionId,
+      retained_until: retainedUntil,
     })
     .select('id')
     .single();

@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import multer from 'multer';
 import { createHandleDebateUpload } from '../controllers/documentCtrl.js';
 import { createDailyAllowance, createRateLimit } from '../lib/rateLimit.js';
@@ -7,13 +8,15 @@ import { recordAiAllowance } from '../lib/observability.js';
 import { freeSttConfig, getFreeSttStatus, transcribeAudioBuffer } from '../services/freeSttClient.js';
 import { assertEvidenceDocumentOwnership } from '../services/ai/supabaseVectorStore.js';
 import { createPollyService, validateTtsText } from '../services/tts/pollyService.js';
+import { commercialModeEnabled } from '../lib/commercialConfig.js';
+import { createCommercialService } from '../lib/commercialService.js';
 
 const memoryStorage = multer.memoryStorage();
 const pdfLimit = Math.min(Number(process.env.MAX_PDF_UPLOAD_BYTES) || 10 * 1024 * 1024, 25 * 1024 * 1024);
 
 const upload = multer({
   storage: memoryStorage,
-  limits: { fileSize: pdfLimit, files: 1, fields: 5 },
+  limits: { fileSize: pdfLimit, files: 1, fields: 6 },
   fileFilter: (_req, file, callback) => {
     const accepted = file.mimetype === 'application/pdf' && /\.pdf$/i.test(file.originalname || '');
     callback(accepted ? null : Object.assign(new Error('Only PDF documents are accepted'), { statusCode: 415 }), accepted);
@@ -46,7 +49,8 @@ export const createAuthenticateMiddleware = (supabase) => async (req, res, next)
 export default function createApiRoutes({ supabase, ttsService = createPollyService() }) {
   const router = express.Router();
   const authenticate = createAuthenticateMiddleware(supabase);
-  const handleDebateUpload = createHandleDebateUpload({ supabase });
+  const commercial = createCommercialService({ supabase });
+  const handleDebateUpload = createHandleDebateUpload({ supabase, commercial });
   const userAllowance = ({ name, max, message, skip }) => createDailyAllowance({
     name,
     max,
@@ -81,7 +85,7 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
       name: 'evidence-arena-user',
       max: launchAiLimits.evidencePerUser,
       message: launchAllowanceMessages.evidence,
-      skip: () => !process.env.GOOGLE_API_KEY,
+      skip: () => commercialModeEnabled() || !process.env.GOOGLE_API_KEY,
     }),
     globalAllowance({
       name: 'evidence-arena-global',
@@ -150,7 +154,7 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
       name: 'tts-user-daily',
       max: launchAiLimits.ttsPerUser,
       message: launchAllowanceMessages.tts,
-      skip: () => !ttsService.capabilities.enabled,
+      skip: () => commercialModeEnabled() || !ttsService.capabilities.enabled,
     }),
     globalAllowance({
       name: 'tts-global-daily',
@@ -161,7 +165,15 @@ export default function createApiRoutes({ supabase, ttsService = createPollyServ
     async (req, res) => {
       try {
         const text = validateTtsText(req.body?.text);
-        const audio = await ttsService.synthesize(text);
+        const metered = await commercial.runMetered({
+          userId: req.user.id,
+          feature: 'tts_character',
+          units: text.length,
+          entitlement: 'ai_sparring',
+          requestKey: req.get('idempotency-key') || `tts:${crypto.randomUUID()}`,
+          action: () => ttsService.synthesizeMeasured(text),
+        });
+        const audio = metered.result;
         res.set({
           'Content-Type': 'audio/mpeg',
           'Content-Length': String(audio.length),

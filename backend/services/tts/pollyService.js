@@ -1,4 +1,5 @@
 import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
+import { buildPollyUsage, measuredProviderResult } from '../../lib/providerUsage.js';
 
 export const MAX_TTS_CHARACTERS = Math.max(
   100,
@@ -48,9 +49,7 @@ export const createPollyService = ({ client = null } = {}) => {
     ? new PollyClient({ region: process.env.AWS_REGION })
     : null);
 
-  return {
-    capabilities,
-    synthesize: async (value) => {
+  const synthesizeDetailed = async (value) => {
       const text = validateTtsText(value);
       if (!capabilities.enabled && !client) {
         const error = new Error('Voice output is not configured.');
@@ -69,7 +68,14 @@ export const createPollyService = ({ client = null } = {}) => {
         }));
         const audio = await audioStreamToBuffer(response.AudioStream);
         if (!audio.length) throw new Error('Amazon Polly returned empty audio.');
-        return audio;
+        return {
+          audio,
+          usage: buildPollyUsage({
+            characters: text.length,
+            engine: process.env.POLLY_ENGINE || 'standard',
+            requestId: response?.$metadata?.requestId || null,
+          }),
+        };
       } catch (cause) {
         console.error('[Amazon Polly] Synthesis failed:', {
           name: cause?.name || 'UnknownError',
@@ -81,6 +87,14 @@ export const createPollyService = ({ client = null } = {}) => {
         error.code = 'TTS_SYNTHESIS_FAILED';
         throw error;
       }
+    };
+
+  return {
+    capabilities,
+    synthesize: async value => (await synthesizeDetailed(value)).audio,
+    synthesizeMeasured: async value => {
+      const result = await synthesizeDetailed(value);
+      return measuredProviderResult(result.audio, result.usage);
     },
   };
 };

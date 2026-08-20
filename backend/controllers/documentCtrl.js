@@ -3,6 +3,7 @@ import { parseAndChunkPdf } from '../services/ai/rag.js';
 import { createKnowledgeBase, createAgents } from '../services/ai/agents.js';
 import { runDebate } from '../services/ai/debate.js';
 import { evaluateGrounding } from '../services/ai/evidenceEvaluator.js';
+import { aggregateProviderUsages } from '../lib/providerUsage.js';
 
 const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -12,7 +13,7 @@ export const hasPdfSignature = (buffer) => (
 
 const safeFilename = (value) => `${value || 'uploaded-document.pdf'}`.replace(/[\u0000-\u001f]/g, '').slice(0, 255);
 
-export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
+export const createHandleDebateUpload = ({ supabase, commercial = null }) => async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Attach one PDF in the "document" field.' });
@@ -63,6 +64,22 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
       return res.status(409).json({ success: false, message: 'An Evidence Arena session is already active.' });
     }
 
+    let usageReservation = null;
+    if (commercial) {
+      try {
+        usageReservation = await commercial.reserve({
+          userId: req.user.id,
+          feature: 'evidence_session',
+          units: 1,
+          entitlement: 'ai_sparring',
+          requestKey: req.get('idempotency-key') || `evidence:${sessionId}`,
+        });
+        usageReservation.feature = 'evidence_session';
+      } catch (error) {
+        return res.status(error.statusCode || 503).json({ success: false, code: error.code, message: error.message });
+      }
+    }
+
     const session = { id: sessionId, userId: req.user.id, socketId, cancelled: false, startedAt: Date.now() };
     sessions.set(sessionId, session);
     res.status(202).json({ success: true, message: 'Cross-examination started.', sessionId });
@@ -76,18 +93,36 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
 
     (async () => {
       let knowledgeBase = null;
+      let completed = false;
+      const providerUsages = [];
       try {
         emitStatus('parsing', { rounds });
         const { chunks } = await parseAndChunkPdf(req.file.buffer);
 
         emitStatus('indexing', { chunkCount: chunks.length });
+        let vaultCollectionId = null;
+        let retainedUntil = null;
+        if (req.body?.vaultCollectionId && commercial) {
+          await commercial.requireEntitlement(req.user.id, 'evidence_vault');
+          const { data: vault, error: vaultError } = await supabase
+            .from('evidence_vault_collections')
+            .select('id,retention_days')
+            .eq('id', req.body.vaultCollectionId)
+            .eq('user_id', req.user.id)
+            .maybeSingle();
+          if (vaultError || !vault) throw new Error('The selected Evidence Vault collection is unavailable.');
+          vaultCollectionId = vault.id;
+          retainedUntil = new Date(Date.now() + Number(vault.retention_days || 365) * 86400000).toISOString();
+        }
         knowledgeBase = await createKnowledgeBase(chunks, {
           supabase,
           userId: req.user.id,
           filename: safeFilename(req.file.originalname),
           topic,
+          vaultCollectionId,
+          retainedUntil,
         });
-        const { defender, critic } = await createAgents(knowledgeBase.retriever);
+        const { defender, critic } = await createAgents(knowledgeBase.retriever, { onUsage: usage => providerUsages.push(usage) });
 
         emitStatus('retrieving', {
           vectorBackend: knowledgeBase.vectorBackend,
@@ -109,7 +144,7 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
 
         if (shouldCancel()) throw new Error('CANCELLED_DEBATE: Session stopped before evaluation.');
         emitStatus('evaluating');
-        const evaluation = await evaluateGrounding({ topic, transcript });
+        const evaluation = await evaluateGrounding({ topic, transcript, onUsage: usage => providerUsages.push(usage) });
         emitStatus('completed');
         io.to(socketId).emit('debate_complete', {
           success: true,
@@ -119,6 +154,7 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
           documentId: knowledgeBase.documentId,
           vectorBackend: knowledgeBase.vectorBackend,
         });
+        completed = true;
       } catch (error) {
         const message = `${error?.message || ''}`;
         const isRateLimited = message.includes('RATE_LIMIT');
@@ -149,6 +185,14 @@ export const createHandleDebateUpload = ({ supabase }) => async (req, res) => {
           });
         }
       } finally {
+        if (commercial && usageReservation) {
+          try {
+            if (completed) await commercial.settle({ userId: req.user.id, reservation: usageReservation, actualUnits: 1, providerUsage: aggregateProviderUsages(providerUsages) });
+            else await commercial.release({ userId: req.user.id, reservation: usageReservation });
+          } catch (usageError) {
+            console.warn('[Evidence Arena] Usage settlement failed:', usageError.message);
+          }
+        }
         sessions.delete(sessionId);
       }
     })();

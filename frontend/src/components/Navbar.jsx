@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, BrainCircuit } from 'lucide-react';
+import { Bell, Shield, Compass, LayoutDashboard, User, ChevronDown, Swords, Plus, Link2, Menu, X, BrainCircuit, Sparkles } from 'lucide-react';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
+import { COMMERCIAL_UI_ENABLED } from '../lib/commercial';
 
 const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeedRefresh, updateServiceWorker, upgradeNotice }) => {
   const location = useLocation();
@@ -55,6 +56,15 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
 
         {user && (
           <div className="flex shrink-0 items-center gap-2">
+            {COMMERCIAL_UI_ENABLED && (
+              <Link
+                to="/pro-studio"
+                title="Open Pro Studio"
+                className={`hidden items-center gap-1.5 rounded-lg border px-2.5 py-2 text-sm font-black transition lg:flex ${isActive('/pro-studio') || isActive('/billing') || isActive('/pricing') ? 'border-violet-400/40 bg-violet-500/15 text-violet-200' : 'border-violet-500/20 bg-violet-500/5 text-violet-300 hover:bg-violet-500/15'}`}
+              >
+                <Sparkles className="h-4 w-4" /> Pro
+              </Link>
+            )}
             {/* Desktop-only Buttons */}
             <div className="hidden items-center gap-1 xl:flex 2xl:gap-2">
               <button
@@ -125,6 +135,7 @@ const Navbar = ({ user, onCreateArena, onJoinArena, socket, needRefresh, setNeed
               <BrainCircuit className="h-5 w-5" />
               <span className="font-semibold text-lg">Arena OS</span>
             </Link>
+            {COMMERCIAL_UI_ENABLED && <Link to="/pro-studio" onClick={() => setIsMenuOpen(false)} className={`flex items-center gap-3 rounded-xl p-3 transition ${isActive('/pro-studio') ? 'bg-violet-500/10 text-violet-300' : 'text-slate-300 active:bg-slate-800'}`}><Sparkles className="h-5 w-5" /><span className="text-lg font-semibold">Pro Studio</span></Link>}
           </div>
 
           <div className="flex flex-col gap-2 mb-8">

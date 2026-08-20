@@ -28,6 +28,7 @@ export default defineConfig({
         VITE_BACKEND_URL: "http://127.0.0.1:5051",
         VITE_SUPABASE_URL: "http://127.0.0.1:5051/e2e-supabase",
         VITE_SUPABASE_ANON_KEY: "e2e-public-key",
+        VITE_COMMERCIAL_MODE_ENABLED: "true",
       },
     },
   ],
